@@ -20,7 +20,7 @@ test('each subscription shows what is left and a button moves the chat onto it',
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('env.get', (_, e) => ({ value: ENV[e.name] }))
   on('session.usage', () => ({ value: { rateLimits: [{ kind: 'five_hour', percentUsed: 29, resetsAt: new Date(now + 36e5).toISOString() }, { kind: 'seven_day', percentUsed: 7, resetsAt: new Date(now + 6 * 864e5).toISOString() }] } }))
-  on('fs.read', () => ({ value: JSON.stringify(ACCOUNTS) }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(ACCOUNTS) : undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('process.run', (_, e) => {
     runs.push([...e.argv])
@@ -36,5 +36,29 @@ test('each subscription shows what is left and a button moves the chat onto it',
   expect(await ui.find({ type: 'Button', key: 'add-subscription' })).toBeTruthy()
   await ui.press({ key: 'move-personal' })
   expect(runs.some(a => a[0] === '/opt/ca/app/acct' && a[1] === 'personal')).toBe(true)
+  await ui.unmount()
+})
+
+test('a demo.json in the config folder replaces every name and number', async ($, on) => {
+  const DEMO = {
+    account: 'work',
+    accounts: { work: { label: 'Work', proX: 5 }, personal: { label: 'Personal', proX: 10 } },
+    mine: [{ kind: 'seven_day', percentUsed: 41, resetsInHours: 70 }],
+    others: { personal: { label: 'Personal', five: null, seven: 22, sevenInHours: 101 } },
+  }
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('env.get', (_, e) => ({ value: ENV[e.name] }))
+  on('session.usage', () => ({ value: { rateLimits: [] } }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('demo.json') ? JSON.stringify(DEMO) : JSON.stringify(ACCOUNTS) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify(PROBES), stderr: '' } }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await new Promise(r => setTimeout(r, 50))
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Text', text: /59% left/ }))?.text).toMatch(/59% left/)
+  expect((await ui.find({ type: 'Text', text: /78% left/ }))?.text).toMatch(/78% left/)
+  expect(await ui.find({ type: 'Text', text: /Side project/ })).toBeFalsy()
   await ui.unmount()
 })

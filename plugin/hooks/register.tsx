@@ -55,17 +55,42 @@ async function watchAccounts($: EngineInterface) {
   } catch {}
 }
 
+// Screenshot mode: HOME/demo.json replaces every number and name with made-up ones (see
+// demo.example.json; reset times are given in hours from now, so a screenshot always looks right).
+type Demo = {
+  account: string
+  accounts: Record<string, { proX?: number; label?: string; note?: string }>
+  mine: { kind: string; percentUsed: number; resetsInHours: number }[]
+  others: Record<string, { label: string; five: number | null; seven: number; fiveInHours?: number; sevenInHours: number }>
+}
+let demo = false
+
+async function readDemo($: EngineInterface): Promise<Demo | null> {
+  try { return JSON.parse(await $.fs.read(`${where.home}/demo.json`)) as Demo } catch { return null }
+}
+
 async function probe($: EngineInterface) {
   try {
     if (!where.app) return
-    const cfg = JSON.parse(await $.fs.read(ACCOUNTS())) as { accounts: Record<string, { proX?: number; label?: string; note?: string }> }
+    const d = await readDemo($)
+    demo = !!d
+    const at = (h?: number) => (h == null ? null : Date.now() + h * 3600 * 1000)
+    if (d) {
+      await update($, account, () => d.account)
+      await update($, mine, () => d.mine.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: new Date(at(w.resetsInHours)!).toISOString() })))
+      await update($, others, () => Object.fromEntries(Object.entries(d.others).map(([k, o]) =>
+        [k, { label: o.label, five: o.five, seven: o.seven, fiveReset: at(o.fiveInHours), sevenReset: at(o.sevenInHours) }])))
+    }
+    const cfg = d ?? JSON.parse(await $.fs.read(ACCOUNTS())) as { accounts: Record<string, { proX?: number; label?: string; note?: string }> }
     const each = <T,>(f: (k: string, a: { proX?: number; label?: string; note?: string }) => T) =>
       Object.fromEntries(Object.entries(cfg.accounts).map(([k, a]) => [k, f(k, a)]))
     await update($, sizes, () => each((_, a) => a.proX ?? 1))
     await update($, labels, () => each((k, a) => a.label ?? (k === 'default' ? 'Desktop login' : k)))
     await update($, notes, () => each((_, a) => a.note ?? ''))
-    const { exitCode, stdout } = await $.process.run(['/usr/bin/python3', LIMITS_PY()], { timeoutMs: 60000 })
-    if (exitCode === 0) await update($, others, () => JSON.parse(stdout) as Record<string, Probe>)
+    if (!d) {
+      const { exitCode, stdout } = await $.process.run(['/usr/bin/python3', LIMITS_PY()], { timeoutMs: 60000 })
+      if (exitCode === 0) await update($, others, () => JSON.parse(stdout) as Record<string, Probe>)
+    }
     await update($, checkedAt, () => Date.now())
   } catch (err) {
     $.ui.log(`subscriptions: probe failed: ${String(err)}`, { to: 'debug' })
@@ -104,7 +129,7 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
-    await update($, mine, () => e.rateLimits)
+    if (!demo) await update($, mine, () => e.rateLimits)
     return next(e)
   })
 
@@ -198,7 +223,7 @@ export const register: Register = on => {
                      meter(`${name}-7`, 'Week', p.seven, p.sevenReset, scale[name] ?? 1, WINDOW_MS.seven)]}
               </Box>
             ))}
-            {acct !== 'default' && !probes.default && (
+            {acct !== 'default' && !probes.default && names.default !== undefined && (
               <Box key="acct-default" flexDirection="column" gap="sm">
                 {accountHead('default', nameOf('default'))}
                 <Text size="footnote" dimColor>No fresh numbers yet</Text>

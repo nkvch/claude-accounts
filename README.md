@@ -2,6 +2,8 @@
 
 Run every Claude Code session in Claude Desktop on its own Claude subscription, in one window.
 
+![Claude Desktop with the Subscriptions pane](docs/screenshot.png)
+
 Claude Desktop gives every Code session the token of the account you are signed in to. If you
 have several subscriptions (work, personal, a team seat, a friend's spare Ultra), you either sign
 out and in all day or run two apps. claude-accounts runs a patched copy of Claude Desktop that,
@@ -44,6 +46,7 @@ Set the plan of the account Claude Desktop is signed in to in `~/.claude-account
 | `tokens.env` | the long-lived tokens (`CC_TOKEN_<NAME>=…`, from `claude setup-token`), mode 600 |
 | `state/` | `hook.log` (which session got which account), `launch.log`, `limits.json`, `overrides.json` |
 | `inject.js` | optional: your own script run in every page of the app |
+| `demo.json` | optional: made-up subscriptions for screenshots (copy `demo.example.json`); remove it to see your own |
 
 `CLAUDE_ACCOUNTS_HOME` moves the folder.
 

@@ -1,0 +1,14 @@
+{
+  "account": "work",
+  "accounts": {
+    "work": { "label": "Work", "proX": 5 },
+    "personal": { "label": "Personal", "proX": 10 }
+  },
+  "mine": [
+    { "kind": "five_hour", "percentUsed": 38, "resetsInHours": 2.2 },
+    { "kind": "seven_day", "percentUsed": 41, "resetsInHours": 70 }
+  ],
+  "others": {
+    "personal": { "label": "Personal", "five": null, "seven": 22, "sevenInHours": 101 }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "claude-accounts",
+  "owner": { "name": "Stanislau Stankevich" },
+  "plugins": [{ "name": "subscriptions", "source": "./plugin" }]
+}

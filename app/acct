@@ -1,0 +1,25 @@
+#!/bin/bash
+# acct            -> show this session's subscription
+# acct <name>     -> run this session on <name> (a key of accounts.json); the app restarts the
+#                    session's process quietly as soon as it is idle (hook.js restartPending)
+HOME_DIR="${CLAUDE_ACCOUNTS_HOME:-$HOME/.claude-accounts}"
+SID="${CLAUDE_CODE_HOST_SESSION_ID:-}"
+[ -n "$SID" ] || { echo "not inside a Claude Desktop Code session"; exit 1; }
+if [ -z "${1:-}" ]; then
+  echo "now: ${CC_ACCOUNT:-default}"; exit 0
+fi
+/usr/bin/python3 - "$HOME_DIR" "$SID" "$1" <<'EOF'
+import json, os, sys
+home, sid, name = sys.argv[1:]
+accounts = json.load(open(os.path.join(home, "accounts.json")))["accounts"]
+if name not in accounts:
+    sys.exit(f"unknown account {name}; known: {', '.join(accounts)}")
+p = os.path.join(home, "state/overrides.json")
+os.makedirs(os.path.join(home, "state/restart"), exist_ok=True)
+try: o = json.load(open(p))
+except Exception: o = {}
+o[sid] = name
+json.dump(o, open(p, "w"), indent=1)
+open(os.path.join(home, "state/restart", sid), "w").close()
+print(f"this session -> {name} ({accounts[name].get('label', name)}); it restarts on it as soon as it is idle")
+EOF

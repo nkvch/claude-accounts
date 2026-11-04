@@ -1,0 +1,16 @@
+{
+  "accounts": {
+    "default": { "label": "Desktop login", "plan": "Max 5x", "proX": 5 },
+    "personal": {
+      "label": "Personal",
+      "tokenKey": "CC_TOKEN_PERSONAL",
+      "plan": "Ultra",
+      "proX": 10,
+      "note": "optional line shown under the name",
+      "env": { "CLAUDE_CODE_SUBSCRIPTION_TYPE": "max" }
+    }
+  },
+  "rules": [
+    { "folder": "~/projects/side-project", "account": "personal" }
+  ]
+}

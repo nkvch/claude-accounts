@@ -13,7 +13,7 @@ const PROBES = {
 const ACCOUNTS = { accounts: { default: { proX: 6.25, label: 'Work' }, personal: { proX: 10, plan: 'Ultra', label: 'Personal' }, side: { proX: 5, label: 'Side project', note: 'used by the bot' } } }
 const ENV: Record<string, string> = { CLAUDE_ACCOUNTS_APP: '/opt/ca/app', CLAUDE_ACCOUNTS_HOME: '/home/.claude-accounts' }
 
-test('each subscription shows what is left and the dropdown moves the chat onto the picked one', async ($, on) => {
+test('each subscription shows what is left and its tab moves the chat onto the picked one', async ($, on) => {
   const runs: string[][] = []
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -35,21 +35,25 @@ test('each subscription shows what is left and the dropdown moves the chat onto 
   expect((await ui.find({ type: 'Text', text: /used by/ }))?.text).toMatch(/used by the bot/)
   expect(await ui.find({ type: 'Button', key: 'add-subscription' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /This chat runs on/ })).toBeTruthy()
-  expect((await ui.find({ type: 'Text', text: /^Work/ }))?.text).toMatch(/^Work\s+6\.25x/)
+  expect((await ui.find({ type: 'Text', text: /This chat runs on/ }))?.text).toMatch(/^This chat runs on\s+Work\s+6\.25x/)
   expect(await ui.find({ type: 'Text', text: /Switching to/ })).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: /Ultra · 10x/ }))?.text).toMatch(/Personal\s+Ultra · 10x/)
   expect(await ui.find({ type: 'Button', key: 'move-personal' })).toBeFalsy()
-  const picker = await ui.find({ type: 'Select', key: 'account' })
-  expect(picker?.props).toMatchObject({ value: 'default', options: [{ value: 'default' }, { value: 'personal' }, { value: 'side' }] })
+  const tab = async (k: string) => (await ui.find({ type: 'Box', key: `tab-${k}` }))?.props
+  for (const k of ['default', 'personal', 'side']) expect(await tab(k)).toBeTruthy()
+  expect(await tab('default')).toMatchObject({ borderStyle: 'round', borderColor: 'claude', borderDimColor: false })
+  expect(await tab('personal')).toMatchObject({ borderStyle: 'round', borderDimColor: true })
+  expect((await tab('personal'))?.borderColor).toBeUndefined()
   const acctRuns = () => runs.filter(a => a[0] === '/opt/ca/app/acct' && a[1] !== 'auto')
-  await ui.select({ key: 'account', value: 'default' })
+  await ui.press({ key: 'tab-btn-default' })
   expect(acctRuns()).toEqual([])
-  await ui.select({ key: 'account', value: 'personal' })
+  await ui.press({ key: 'tab-btn-personal' })
   expect(acctRuns()).toEqual([['/opt/ca/app/acct', 'personal']])
-  expect((await ui.find({ type: 'Select', key: 'account' }))?.props).toMatchObject({ value: 'personal' })
+  expect(await tab('personal')).toMatchObject({ borderColor: 'claude', borderDimColor: false })
+  expect(await tab('default')).toMatchObject({ borderDimColor: true })
   expect((await ui.find({ type: 'Text', text: /Switching to/ }))?.text).toMatch(/Switching to Personal when this chat is idle/)
-  expect((await ui.find({ type: 'Text', text: /^Work/ }))?.text).toMatch(/^Work/)
-  await ui.select({ key: 'account', value: 'default' })
+  expect((await ui.find({ type: 'Text', text: /This chat runs on/ }))?.text).toMatch(/^This chat runs on\s+Work/)
+  await ui.press({ key: 'tab-btn-default' })
   expect(acctRuns()).toEqual([['/opt/ca/app/acct', 'personal'], ['/opt/ca/app/acct', 'default']])
   expect(await ui.find({ type: 'Text', text: /Switching to/ })).toBeFalsy()
   await ui.unmount()
@@ -273,12 +277,16 @@ test('a failed press with no output at all still says which command failed and h
   await ui.unmount()
 })
 
-test('the dropdown always lists the current and the picked account, even when accounts.json does not name them', async ($, on) => {
+test('the tabs always list the current and the picked account, even when accounts.json does not name them', async ($, on) => {
   const w: World = { env: { CC_ACCOUNT: 'ghost' }, accounts: { accounts: { default: { label: 'Work' }, personal: { label: 'Personal' } } }, probes: {}, acct: () => OK('this session -> personal') }
   const { ui, clock } = await boot($, on, w)
-  const values = async () => ((await ui.find({ type: 'Select', key: 'account' }))?.props.options as { value: string }[]).map(o => o.value).sort()
+  const values = async () => {
+    const found: string[] = []
+    for (const k of ['default', 'ghost', 'personal', 'side']) if (await ui.find({ type: 'Box', key: `tab-${k}` })) found.push(k)
+    return found
+  }
   expect(await values()).toEqual(['default', 'ghost', 'personal'])
-  await ui.select({ key: 'account', value: 'personal' })
+  await ui.press({ key: 'tab-btn-personal' })
   await clock.advance(20 * 1000)
   w.accounts = { accounts: { default: { label: 'Work' } } }
   await clock.advance(20 * 1000)
@@ -294,8 +302,8 @@ test('a failed `acct <name>` toasts the error and leaves the pick where it was',
   ]
   const { ui, toasts } = await boot($, on, { acct: argv => (argv[1] === 'auto' ? OK('on\n') : answers.shift() ?? OK(''))  })
   for (let i = 0; i < 3; i++) {
-    await ui.select({ key: 'account', value: 'personal' })
-    expect((await ui.find({ type: 'Select', key: 'account' }))?.props).toMatchObject({ value: 'default' })
+    await ui.press({ key: 'tab-btn-personal' })
+    expect((await ui.find({ type: 'Box', key: 'tab-default' }))?.props).toMatchObject({ borderColor: 'claude', borderDimColor: false })
   }
   expect(toasts).toEqual(['no such account', 'boom', 'nothing to do'])
   expect(await ui.find({ type: 'Text', text: /Switching to/ })).toBeFalsy()

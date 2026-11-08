@@ -183,7 +183,6 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Button, Text } = ui
-    const Select = 'Select' in ui ? ui.Select : undefined
     if (!where.app) {
       return <Text size="footnote" dimColor>This chat does not run in Claude Accounts. Open Claude through Claude Launcher.</Text>
     }
@@ -271,7 +270,7 @@ export const register: Register = on => {
       )
     }
 
-    // An account's name, plan and note. Where there is no Select (mobile), a button moves this chat onto it.
+    // An account's name, plan and note.
     const accountHead = (name: string, label: string) => (
       <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
         <Text weight="semibold">
@@ -279,7 +278,6 @@ export const register: Register = on => {
           {planOf(name) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(name)}`}</Text> : ''}
           {noteOf[name] ? <Text weight="regular" size="footnote" dimColor>{`  ${noteOf[name]}`}</Text> : ''}
         </Text>
-        {!Select && <Button key={`move-${name}`} label="Move chat here" variant="secondary" onPress={moveHere(name)} />}
       </Box>
     )
     const choices = [...new Set([...Object.keys(names), acct, shown])].sort((a, b) => Number(b === 'default') - Number(a === 'default'))
@@ -292,22 +290,23 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap="lg">
         <Box flexDirection="column" gap="sm">
-          <Box flexDirection="column">
-            <Text size="footnote" dimColor>This chat runs on</Text>
-            <Text size="heading" weight="semibold">
-              {nameOf(acct)}
-              {planOf(acct) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(acct)}`}</Text> : ''}
-            </Text>
-          </Box>
+          <Text size="heading" weight="semibold">
+            <Text weight="regular" size="footnote" dimColor>{'This chat runs on  '}</Text>
+            {nameOf(acct)}
+            {planOf(acct) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(acct)}`}</Text> : ''}
+          </Text>
           {shown !== acct && <Text size="footnote" color="warning">{`Switching to ${nameOf(shown)} when this chat is idle`}</Text>}
-          {Select && choices.length > 0 && (
-            <Select
-              key="account"
-              label="Switch to"
-              value={shown}
-              options={choices.map(k => ({ value: k, label: nameOf(k) }))}
-              onSelect={value => { if (value !== shown) void moveHere(value)() }}
-            />
+          {choices.length > 1 && (
+            <Box flexDirection="column" gap="xs">
+              <Text size="footnote" dimColor>Switch to</Text>
+              <Box flexDirection="row" flexWrap="wrap" gap="sm">
+                {choices.map(k => (
+                  <Box key={`tab-${k}`} borderStyle="round" borderColor={k === shown ? 'claude' : undefined} borderDimColor={k !== shown} paddingX={1}>
+                    <Button key={`tab-btn-${k}`} label={nameOf(k)} variant={k === shown ? 'primary' : 'secondary'} onPress={() => { if (k !== shown) void moveHere(k)() }} />
+                  </Box>
+                ))}
+              </Box>
+            </Box>
           )}
           {five || seven
             ? [five && meter('mine-5', '5 hours', five.percentUsed, isoMs(five.resetsAt), barOf(acct), WINDOW_MS.five),

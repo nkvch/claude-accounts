@@ -310,13 +310,15 @@ export const register: Register = on => {
           </Text>
           {shown !== acct && <Text size="footnote" color="warning">{`Switching to ${nameOf(shown)} when this chat is idle`}</Text>}
           {Select && choices.length > 0 && (
-            <Select
-              key="account"
-              label="Switch to"
-              value={shown}
-              options={choices.map(k => ({ value: k, label: nameOf(k) }))}
-              onSelect={value => { if (value !== shown) void moveHere(value)() }}
-            />
+            <Box flexDirection="column" gap="xs" alignItems="stretch">
+              <Text size="footnote" dimColor>Switch to</Text>
+              <Select
+                key="account"
+                value={shown}
+                options={choices.map(k => ({ value: k, label: nameOf(k) }))}
+                onSelect={value => { if (value !== shown) void moveHere(value)() }}
+              />
+            </Box>
           )}
         </Box>
 

@@ -12,10 +12,7 @@ const LOG = path.join(HOME, "state/hook.log");
 const LIMITS = path.join(HOME, "state/limits.json");
 const OVERRIDES = path.join(HOME, "state/overrides.json");
 
-const NEW_SESSION_MS = 30 * 60 * 1000; // a record younger than this is a new chat
 const LIMITS_FRESH_MS = 30 * 60 * 1000; // older numbers are not trusted for a choice
-const MAX_FIVE = 90; // percent used: above this a subscription is not picked
-const MAX_SEVEN = 95;
 
 // Identity the desktop stamps for its own account; wrong for a borrowed token.
 const DESKTOP_IDENTITY = [
@@ -61,25 +58,6 @@ function remember(sessionId, name) {
   try { fs.writeFileSync(OVERRIDES, JSON.stringify({ ...readJson(OVERRIDES, {}), [sessionId]: name }, null, 1)); } catch {}
 }
 
-// Unused weekly limit per hour left until the weekly reset, in Pro-weeks (the plan's `proX`
-// from accounts.json times the unused share): the subscription whose limit would otherwise go
-// to waste soonest scores highest, so a bigger plan counts for more. Needs room in the 5h
-// window too, where the plan has one.
-function best(cfg, now = Date.now()) {
-  const limits = readJson(LIMITS, {});
-  let top;
-  for (const name of Object.keys(cfg.accounts || {})) {
-    if (cfg.accounts[name].auto === false) continue;   // reserved (the bot's subscription): only by explicit override
-    const l = limits[name];
-    if (!l || l.error || l.unknown || now - (l.at || 0) > LIMITS_FRESH_MS) continue;
-    if (l.status === "rejected" || (l.five ?? 0) >= MAX_FIVE || l.seven >= MAX_SEVEN) continue;
-    const hours = Math.max(1, ((l.sevenReset || now) - now) / 3.6e6);
-    const score = ((100 - l.seven) * (cfg.accounts[name].proX ?? 1)) / hours;
-    if (!top || score > top.score) top = { name, score, l };
-  }
-  return top;
-}
-
 function pick(state, cfg, sessionId, cwd) {
   const overrides = readJson(OVERRIDES, {});
   if (overrides[sessionId]) return { name: overrides[sessionId], why: "override" };
@@ -96,15 +74,7 @@ function pick(state, cfg, sessionId, cwd) {
     const dir = path.resolve(r.folder.replace(/^~/, home));
     if (cwd && (cwd === dir || cwd.startsWith(dir + path.sep))) return { name: r.account, why: `rule ${r.folder}` };
   }
-  // Only a new chat is placed automatically; an older one keeps running where it was.
-  const isNew = !rec || Date.now() - (rec.createdAt || 0) < NEW_SESSION_MS;
-  if (isNew) {
-    const top = best(cfg);
-    if (top) {
-      remember(sessionId, top.name);
-      return { name: top.name, why: `auto: 5h ${top.l.five ?? "none"}%, week ${top.l.seven}%, score ${top.score.toFixed(2)}` };
-    }
-  }
+  // No automatic placement: a new chat stays on the desktop login until moved by hand (override).
   return { name: "default", why: "default" };
 }
 
@@ -117,14 +87,13 @@ exports.acct = (state, sessionId, cwd, env) => {
   const cfg = config();
   let { name, why } = pick(state, cfg, sessionId, cwd);
   // A subscription whose last check failed (e.g. its org turned Claude Code off) would only
-  // error out; run on the best working one meanwhile. The override stays, for when it is back.
+  // error out; run on the desktop login meanwhile. The override stays, for when it is back.
   const failed = readJson(LIMITS, {})[name];
   // A network error of the probe (TypeError = fetch failed, e.g. right after the Mac wakes) says nothing about the account.
   const transient = ["TypeError", "TimeoutError", "AbortError"].includes(failed?.error);
   if (name !== "default" && failed?.error && !transient && Date.now() - failed.at < LIMITS_FRESH_MS) {
-    const top = best(cfg);
-    why = `${name} unavailable (${failed.error}), using ${top ? top.name : "default"}; was ${why}`;
-    name = top ? top.name : "default";
+    why = `${name} unavailable (${failed.error}), using default; was ${why}`;
+    name = "default";
   }
   const acct = cfg.accounts?.[name];
   const token = acct?.tokenKey ? envValue(acct.tokenKey) : undefined;
@@ -192,5 +161,4 @@ exports.refreshLimits = async (state) => {
 };
 
 exports.log = log;
-exports.best = best;
 exports.config = config;

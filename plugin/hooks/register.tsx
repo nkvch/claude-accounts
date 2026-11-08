@@ -27,6 +27,8 @@ const pace = (left: number, timeLeft: number) =>
   left >= timeLeft ? 'success' : left >= timeLeft * 0.7 ? 'warning' : 'error'
 
 const account = atom({ plugin: 'subscriptions', key: 'account' } as const, 'default')
+// The last pick in the dropdown: the chat runs on `account` until its process restarts.
+const picked = atom({ plugin: 'subscriptions', key: 'picked' } as const, 'default')
 const mine = atom({ plugin: 'subscriptions', key: 'mine' } as const, [])
 const others = atom({ plugin: 'subscriptions', key: 'others' } as const, {})
 const checkedAt = atom({ plugin: 'subscriptions', key: 'checkedAt' } as const, 0)
@@ -77,6 +79,7 @@ async function probe($: EngineInterface) {
     const at = (h?: number) => (h == null ? null : Date.now() + h * 3600 * 1000)
     if (d) {
       await update($, account, () => d.account)
+      await update($, picked, () => d.account)
       await update($, mine, () => d.mine.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: new Date(at(w.resetsInHours)!).toISOString() })))
       await update($, others, () => Object.fromEntries(Object.entries(d.others).map(([k, o]) =>
         [k, { label: o.label, five: o.five, seven: o.seven, fiveReset: at(o.fiveInHours), sevenReset: at(o.sevenInHours) }])))
@@ -106,6 +109,7 @@ export const register: Register = on => {
     where.home = (await $.env.get('CLAUDE_ACCOUNTS_HOME')) ?? ''
     const acct = (await $.env.get('CC_ACCOUNT')) ?? 'default'
     await update($, account, () => acct)
+    await update($, picked, () => acct)
     const usage = await $.session.usage()
     await update($, mine, () => usage.rateLimits)
     void $.ui.open({ id: PANE, title: TITLE })
@@ -134,11 +138,14 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Button, Text } = ui
+    const Select = 'Select' in ui ? ui.Select : undefined
     if (!where.app) {
       return <Text size="footnote" dimColor>This chat does not run in Claude Accounts. Open Claude through Claude Launcher.</Text>
     }
     const acct = await read($, account)
+    const shown = await read($, picked)
     const limits = await read($, mine)
     const probes = await read($, others)
     const checked = await read($, checkedAt)
@@ -150,8 +157,14 @@ export const register: Register = on => {
 
     const now = Date.now()
     const moveHere = (name: string) => async () => {
-      const { stdout, stderr } = await $.process.run([ACCT(), name], { timeoutMs: 15000 })
-      $.ui.toast(stdout.includes('->') ? `Switching this chat to ${nameOf(name)}: it restarts on it as soon as it is idle.` : (stderr || stdout).trim())
+      try {
+        const { stdout, stderr } = await $.process.run([ACCT(), name], { timeoutMs: 15000 })
+        const moved = stdout.includes('->')
+        if (moved) await update($, picked, () => name)
+        $.ui.toast(moved ? `Switching this chat to ${nameOf(name)}: it restarts on it as soon as it is idle.` : (stderr || stdout).trim())
+      } catch (err) {
+        $.ui.toast(`Could not switch to ${nameOf(name)}: ${String(err)}`)
+      }
     }
     // Dialogs take it from here (name, plan, sign-in); detached so the pane is not held while they wait.
     const addSubscription = async () => {
@@ -186,13 +199,14 @@ export const register: Register = on => {
       )
     }
 
-    // An account's name, what it is, and the control that moves this chat onto it.
+    // An account's name and what it is. Where there is no Select (mobile), a button moves this chat onto it.
     const accountHead = (name: string, label: string) => (
       <Box flexDirection="row" justifyContent="space-between" gap="sm">
         <Text weight="semibold">{label}{noteOf[name] ? <Text weight="regular" size="footnote" dimColor>{`  ${noteOf[name]}`}</Text> : ''}</Text>
-        <Button key={`move-${name}`} label="Move chat here" variant="secondary" onPress={moveHere(name)} />
+        {!Select && <Button key={`move-${name}`} label="Move chat here" variant="secondary" onPress={moveHere(name)} />}
       </Box>
     )
+    const choices = [...new Set([...Object.keys(names), acct, shown])].sort((a, b) => Number(b === 'default') - Number(a === 'default'))
 
     const five = limits.find(l => l.kind === 'five_hour')
     const seven = limits.find(l => l.kind === 'seven_day')
@@ -205,6 +219,15 @@ export const register: Register = on => {
           <Text size="heading" weight="semibold">
             {nameOf(acct)}<Text weight="regular" dimColor>  this chat</Text>
           </Text>
+          {Select && choices.length > 0 && (
+            <Select
+              key="account"
+              label="Subscription"
+              value={shown}
+              options={choices.map(k => ({ value: k, label: nameOf(k) }))}
+              onSelect={value => { if (value !== shown) void moveHere(value)() }}
+            />
+          )}
           {five || seven
             ? [five && meter('mine-5', '5 hours', five.percentUsed, isoMs(five.resetsAt), scale[acct] ?? 1, WINDOW_MS.five),
                seven && meter('mine-7', 'Week', seven.percentUsed, isoMs(seven.resetsAt), scale[acct] ?? 1, WINDOW_MS.seven)]

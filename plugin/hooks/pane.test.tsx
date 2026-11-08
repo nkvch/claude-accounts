@@ -13,7 +13,7 @@ const PROBES = {
 const ACCOUNTS = { accounts: { default: { proX: 6.25, label: 'Work' }, personal: { proX: 10, label: 'Personal' }, side: { proX: 5, label: 'Side project', note: 'used by the bot' } } }
 const ENV: Record<string, string> = { CLAUDE_ACCOUNTS_APP: '/opt/ca/app', CLAUDE_ACCOUNTS_HOME: '/home/.claude-accounts' }
 
-test('each subscription shows what is left and a button moves the chat onto it', async ($, on) => {
+test('each subscription shows what is left and the dropdown moves the chat onto the picked one', async ($, on) => {
   const runs: string[][] = []
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -34,8 +34,17 @@ test('each subscription shows what is left and a button moves the chat onto it',
   expect((await ui.find({ type: 'Text', text: /90% left/ }))?.text).toMatch(/90% left/)
   expect((await ui.find({ type: 'Text', text: /used by/ }))?.text).toMatch(/used by the bot/)
   expect(await ui.find({ type: 'Button', key: 'add-subscription' })).toBeTruthy()
-  await ui.press({ key: 'move-personal' })
-  expect(runs.some(a => a[0] === '/opt/ca/app/acct' && a[1] === 'personal')).toBe(true)
+  expect(await ui.find({ type: 'Button', key: 'move-personal' })).toBeFalsy()
+  const picker = await ui.find({ type: 'Select', key: 'account' })
+  expect(picker?.props).toMatchObject({ value: 'default', options: [{ value: 'default' }, { value: 'personal' }, { value: 'side' }] })
+  const acctRuns = () => runs.filter(a => a[0] === '/opt/ca/app/acct')
+  await ui.select({ key: 'account', value: 'default' })
+  expect(acctRuns()).toEqual([])
+  await ui.select({ key: 'account', value: 'personal' })
+  expect(acctRuns()).toEqual([['/opt/ca/app/acct', 'personal']])
+  expect((await ui.find({ type: 'Select', key: 'account' }))?.props).toMatchObject({ value: 'personal' })
+  await ui.select({ key: 'account', value: 'default' })
+  expect(acctRuns()).toEqual([['/opt/ca/app/acct', 'personal'], ['/opt/ca/app/acct', 'default']])
   await ui.unmount()
 })
 

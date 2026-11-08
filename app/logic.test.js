@@ -89,3 +89,43 @@ test("a sub-session inherits its parent's account", () => {
   assert.strictEqual(env.CC_ACCOUNT, "cr");
   assert.strictEqual(state.chosen.get("child"), "cr");
 });
+
+const child = (sid, parent) => {
+  const dir = path.join(SESSIONS, "a/b");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sid}.json`), JSON.stringify({ spawnedFrom: { sessionId: parent }, createdAt: Date.now() }));
+};
+
+test("a sub-session inherits a healthy override of its parent and remembers it", () => {
+  write("state/overrides.json", { parent: "cr" });
+  child("child", "parent");
+  const state = { chosen: new Map() };
+  run("parent", "/tmp/proj", state);
+  const { env } = run("child", "/tmp/proj", state);
+  assert.strictEqual(env.CC_ACCOUNT, "cr");
+  assert.strictEqual(overrides().child, "cr");
+});
+
+test("a sub-session does not pin the fallback its parent was moved to", () => {
+  write("state/overrides.json", { parent: "cr" });
+  limits({ error: "org_disabled", at: Date.now() });
+  child("child", "parent");
+  const state = { chosen: new Map() };
+  assert.strictEqual(run("parent", "/tmp/proj", state).env.CC_ACCOUNT, undefined);
+  assert.strictEqual(run("child", "/tmp/proj", state).env.CC_ACCOUNT, undefined);
+  assert.strictEqual(state.chosen.get("child"), "default");
+  assert.strictEqual(overrides().child, "cr");
+
+  limits(goodCr());
+  assert.strictEqual(run("child", "/tmp/proj", { chosen: new Map() }).env.CC_ACCOUNT, "cr");
+});
+
+test("a sub-session of a default parent leaves no permanent default override", () => {
+  config({ rules: [{ folder: "/tmp/pinned", account: "cr" }] });
+  child("child", "parent");
+  const state = { chosen: new Map() };
+  run("parent", "/tmp/other", state);
+  const { env } = run("child", "/tmp/pinned", state);
+  assert.strictEqual(env.CC_ACCOUNT, undefined);
+  assert.strictEqual(overrides().child, undefined);
+});

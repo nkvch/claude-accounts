@@ -183,6 +183,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Button, Text } = ui
+    const Select = 'Select' in ui ? ui.Select : undefined
     if (!where.app) {
       return <Text size="footnote" dimColor>This chat does not run in Claude Accounts. Open Claude through Claude Launcher.</Text>
     }
@@ -241,45 +242,57 @@ export const register: Register = on => {
       $.ui.toast('Follow the dialogs to add a subscription.')
     }
 
-    // One limit as what is left: the percent on the left, the window and its reset above a bar drawn to the
-    // plan's size, filled with what is left; a thin mark stands where an even spend would be now (the share of the window still to go).
+    // One limit as a row: the window, a bar drawn to the plan's size and filled with what is left, the percent left
+    // and when it resets; a thin mark stands where an even spend would be now (the share of the window still to go).
     const meter = (key: string, label: string, pct: number | null | undefined, reset: number | null | undefined,
       size: number, windowMs: number) => {
       const left = 100 - Math.max(0, Math.min(100, Math.round(pct ?? 0)))
       const timeLeft = reset ? Math.max(0, Math.min(100, Math.round(((reset - now) / windowMs) * 100))) : 100
-      const note = reset ? `resets ${when(reset)}` : 'window not started'
       const fill = pace(left, timeLeft)
       const seg = (k: string, w: number, color: string) => w > 0 && <Box key={k} width={`${w}%`} height={1} backgroundColor={color} />
       return (
-        <Box key={key} flexDirection="row" alignItems="center" gap="md">
-          <Box width={7} justifyContent="flex-end">
-            <Text size="heading" weight="semibold" tabular>{`${left}%`}</Text>
+        <Box key={key} flexDirection="row" alignItems="center" gap="sm">
+          <Box width={9}>
+            <Text size="footnote" dimColor>{label}</Text>
           </Box>
-          <Box flexDirection="column" gap="xs" flexGrow={1}>
-            <Box flexDirection="row" justifyContent="space-between" gap="sm">
-              <Text size="footnote" weight="semibold">{label}</Text>
-              <Text size="footnote" tabular dimColor>{note}</Text>
-            </Box>
+          <Box flexGrow={1}>
             <Box key={`track-${key}`} flexDirection="row" height={1} width={`${size}%`} backgroundColor={TRACK}>
               {left >= timeLeft
                 ? [seg('a', timeLeft, fill), <Box key="m" width="2%" height={1} backgroundColor={MARK} />, seg('b', left - timeLeft, fill)]
                 : [seg('a', left, fill), seg('b', timeLeft - left, TRACK), <Box key="m" width="2%" height={1} backgroundColor={MARK} />]}
             </Box>
           </Box>
+          <Box width={5} justifyContent="flex-end">
+            <Text size="footnote" weight="semibold" tabular>{`${left}%`}</Text>
+          </Box>
+          <Box width={12} justifyContent="flex-end">
+            <Text size="footnote" tabular dimColor>{reset ? when(reset) : 'not started'}</Text>
+          </Box>
         </Box>
       )
     }
 
-    // An account's name, plan and note.
-    const accountHead = (name: string, label: string) => (
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
-        <Text weight="semibold">
-          {label}
-          {planOf(name) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(name)}`}</Text> : ''}
-          {noteOf[name] ? <Text weight="regular" size="footnote" dimColor>{`  ${noteOf[name]}`}</Text> : ''}
-        </Text>
-      </Box>
-    )
+    // One subscription as a card: its name, plan and note, "this chat" or a Use button, and its limits.
+    // The card of the picked subscription has a bright border, the others a faint one.
+    const card = (name: string, body: unknown) => {
+      const mine = name === shown
+      return (
+        <Box key={`card-${name}`} flexDirection="column" gap="sm" paddingX={1} borderStyle="round"
+          borderColor={mine ? 'claude' : undefined} borderDimColor={!mine}>
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
+            <Text weight="semibold">
+              {nameOf(name)}
+              {planOf(name) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(name)}`}</Text> : ''}
+              {noteOf[name] ? <Text weight="regular" size="footnote" dimColor>{`  ${noteOf[name]}`}</Text> : ''}
+            </Text>
+            {mine
+              ? <Text size="footnote" dimColor>{name === acct ? 'this chat' : 'next'}</Text>
+              : <Button key={`move-${name}`} label="Use" variant="secondary" onPress={moveHere(name)} />}
+          </Box>
+          {body}
+        </Box>
+      )
+    }
     const choices = [...new Set([...Object.keys(names), acct, shown])].sort((a, b) => Number(b === 'default') - Number(a === 'default'))
 
     const five = limits.find(l => l.kind === 'five_hour')
@@ -296,44 +309,34 @@ export const register: Register = on => {
             {planOf(acct) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(acct)}`}</Text> : ''}
           </Text>
           {shown !== acct && <Text size="footnote" color="warning">{`Switching to ${nameOf(shown)} when this chat is idle`}</Text>}
-          {choices.length > 1 && (
-            <Box flexDirection="column" gap="xs">
-              <Text size="footnote" dimColor>Switch to</Text>
-              <Box flexDirection="row" flexWrap="wrap" gap="sm">
-                {choices.map(k => (
-                  <Box key={`tab-${k}`} borderStyle="round" borderColor={k === shown ? 'claude' : undefined} borderDimColor={k !== shown} paddingX={1}>
-                    <Button key={`tab-btn-${k}`} label={nameOf(k)} variant={k === shown ? 'primary' : 'secondary'} onPress={() => { if (k !== shown) void moveHere(k)() }} />
-                  </Box>
-                ))}
-              </Box>
-            </Box>
+          {Select && choices.length > 0 && (
+            <Select
+              key="account"
+              label="Switch to"
+              value={shown}
+              options={choices.map(k => ({ value: k, label: nameOf(k) }))}
+              onSelect={value => { if (value !== shown) void moveHere(value)() }}
+            />
           )}
-          {five || seven
-            ? [five && meter('mine-5', '5 hours', five.percentUsed, isoMs(five.resetsAt), barOf(acct), WINDOW_MS.five),
-               seven && meter('mine-7', 'Week', seven.percentUsed, isoMs(seven.resetsAt), barOf(acct), WINDOW_MS.seven)]
-            : <Text size="footnote" dimColor>Numbers appear after the first reply.</Text>}
         </Box>
 
-        {hasRest && (
-          <Box flexDirection="column" gap="lg">
-            <Text size="footnote" dimColor>Other subscriptions</Text>
-            {rest.map(([name, p]) => (
-              <Box key={`acct-${name}`} flexDirection="column" gap="md">
-                {accountHead(name, nameOf(name))}
-                {p.error
-                  ? <Text size="footnote" dimColor>{`Couldn't check: ${p.error}`}</Text>
-                  : [p.five != null && meter(`${name}-5`, '5 hours', p.five, p.fiveReset, barOf(name), WINDOW_MS.five),
-                     meter(`${name}-7`, 'Week', p.seven, p.sevenReset, barOf(name), WINDOW_MS.seven)]}
+        <Box flexDirection="column" gap="md">
+          {card(acct, five || seven
+            ? <Box flexDirection="column" gap="sm">
+                {five && meter('mine-5', '5 hours', five.percentUsed, isoMs(five.resetsAt), barOf(acct), WINDOW_MS.five)}
+                {seven && meter('mine-7', 'Week', seven.percentUsed, isoMs(seven.resetsAt), barOf(acct), WINDOW_MS.seven)}
               </Box>
-            ))}
-            {acct !== 'default' && !probes.default && names.default !== undefined && (
-              <Box key="acct-default" flexDirection="column" gap="md">
-                {accountHead('default', nameOf('default'))}
-                <Text size="footnote" dimColor>No fresh numbers yet</Text>
-              </Box>
-            )}
-          </Box>
-        )}
+            : <Text size="footnote" dimColor>Numbers appear after the first reply.</Text>)}
+          {hasRest && <Text size="footnote" dimColor>Other subscriptions</Text>}
+          {hasRest && rest.map(([name, p]) => card(name, p.error
+            ? <Text size="footnote" dimColor>{`Couldn't check: ${p.error}`}</Text>
+            : <Box flexDirection="column" gap="sm">
+                {p.five != null && meter(`${name}-5`, '5 hours', p.five, p.fiveReset, barOf(name), WINDOW_MS.five)}
+                {meter(`${name}-7`, 'Week', p.seven, p.sevenReset, barOf(name), WINDOW_MS.seven)}
+              </Box>))}
+          {acct !== 'default' && !probes.default && names.default !== undefined &&
+            card('default', <Text size="footnote" dimColor>No fresh numbers yet</Text>)}
+        </Box>
 
         {rest.length === 0 && acct === 'default' && <Text size="footnote" dimColor>Checking…</Text>}
         {auto && (

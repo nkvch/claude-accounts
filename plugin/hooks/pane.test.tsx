@@ -100,7 +100,7 @@ test('each bar is drawn to its plan size: twice the plan, twice the width, the b
   expect(await width('track-mine-7')).toBe('100%')
   expect(await width('track-side-7')).toBe('50%')
   expect(await width('track-side-5')).toBe('50%')
-  expect(await width('track-tiny-7')).toBe('20%')
+  expect(await width('track-tiny-7')).toBe('4%')
   await ui.unmount()
 })
 
@@ -146,7 +146,7 @@ type World = {
   accounts?: unknown
   probes?: unknown
   limits?: { kind: string; percentUsed: number; resetsAt: string }[]
-  acct?: (argv: string[]) => Run
+  acct?: (argv: string[]) => Run | Promise<Run>
 }
 const OK = (stdout: string): Run => ({ exitCode: 0, stdout, stderr: '' })
 const SEVEN = (percentUsed: number, days = 3.5) => [{ kind: 'seven_day', percentUsed, resetsAt: new Date(now + days * 864e5).toISOString() }]
@@ -163,10 +163,10 @@ async function boot($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters
   on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(w.accounts ?? ACCOUNTS) : undefined }))
   on('ui.log', () => ({ value: undefined }))
   on('ui.toast', (_, e) => { toasts.push(e.text); return { value: undefined } })
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     runs.push([...e.argv])
     if (e.argv[0] === '/usr/bin/python3') return { value: OK(JSON.stringify(w.probes ?? PROBES)) }
-    return { value: w.acct ? w.acct(e.argv) : OK('this session -> x') }
+    return { value: w.acct ? await w.acct(e.argv) : OK('this session -> x') }
   })
   const clock = mock.clock(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
@@ -174,6 +174,17 @@ async function boot($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   return { ui, runs, toasts, clock }
 }
+
+test('a plan is drawn in proportion, not floored; one below the minimum share is drawn at exactly the minimum', async ($, on) => {
+  const accounts = { accounts: { default: { proX: 20, label: 'Big' }, one: { proX: 1, label: 'One' }, speck: { proX: 0.2, label: 'Speck' } } }
+  const p = (label: string) => ({ label, five: null, seven: 5, fiveReset: null, sevenReset: now + 3 * 864e5 })
+  const { ui } = await boot($, on, { accounts, probes: { one: p('One'), speck: p('Speck') }, limits: SEVEN(7) })
+  const width = async (key: string) => (await ui.find({ type: 'Box', key }))?.props.width
+  expect(await width('track-mine-7')).toBe('100%')
+  expect(await width('track-one-7')).toBe('5%')
+  expect(await width('track-speck-7')).toBe('4%')
+  await ui.unmount()
+})
 
 test('a bar without a usable size is full width and never poisons the others', async ($, on) => {
   const accounts = { accounts: { default: { proX: 10, label: 'Big' }, none: { label: 'None' }, junk: { proX: 'big', label: 'Junk' }, zero: { proX: 0, label: 'Zero' } } }
@@ -308,5 +319,78 @@ test('a change of accounts.json made elsewhere is picked up by the watcher, incl
   w.accounts = { accounts: { default: { label: 'Work' } } }
   await clock.advance(20 * 1000)
   expect(await autoButton(ui)).toMatchObject({ label: 'Off' })
+  await ui.unmount()
+})
+
+const autoRuns = (runs: string[][]) => runs.filter(a => a[0] === '/opt/ca/app/acct' && a[1] === 'auto')
+
+test('a slow read that answers after a press does not put the old state back', async ($, on) => {
+  let state = 'on'
+  let release: (r: Run) => void = () => {}
+  let slow = false
+  const w: World = {
+    acct: argv => {
+      if (argv[2]) { state = argv[2]; return OK(`${state}\n`) }
+      if (slow) { slow = false; return new Promise<Run>(r => { release = r }) }
+      return OK(`${state}\n`)
+    },
+  }
+  const { ui, clock } = await boot($, on, w)
+  expect(await autoButton(ui)).toMatchObject({ label: 'On' })
+  await clock.advance(20 * 1000)
+  slow = true
+  w.accounts = { accounts: { default: { label: 'Work' } } }
+  void clock.advance(20 * 1000)
+  await new Promise(r => setTimeout(r, 50))
+  await ui.press({ key: 'auto-place' })
+  expect(await autoButton(ui)).toMatchObject({ label: 'Off' })
+  release(OK('on\n'))
+  await new Promise(r => setTimeout(r, 50))
+  expect(await autoButton(ui)).toMatchObject({ label: 'Off' })
+  await ui.unmount()
+})
+
+for (const [name, out] of [['empty', ''], ['whitespace', ' \n'], ['garbage', 'maybe\n'], ['a near miss', 'ON']] as const) {
+  test(`${name} output from \`acct auto\` with exit code 0 is an unknown state on read, and pressing it only reads again`, async ($, on) => {
+    let bad = true
+    const { ui, runs } = await boot($, on, { acct: () => OK(bad ? out : 'off\n') })
+    expect(await autoButton(ui)).toMatchObject({ label: 'unknown' })
+    bad = false
+    await ui.press({ key: 'auto-place' })
+    expect(autoRuns(runs).filter(a => a[2])).toEqual([])
+    expect(await autoButton(ui)).toMatchObject({ label: 'Off' })
+    await ui.unmount()
+  })
+
+  test(`${name} output from a press with exit code 0 is an unknown state, not the requested value`, async ($, on) => {
+    let bad = false
+    const { ui } = await boot($, on, { acct: argv => (bad && argv[2] ? OK(out) : OK('on\n')) })
+    expect(await autoButton(ui)).toMatchObject({ label: 'On' })
+    bad = true
+    await ui.press({ key: 'auto-place' })
+    expect(await autoButton(ui)).toMatchObject({ label: 'unknown' })
+    await ui.unmount()
+  })
+}
+
+test('pressing unknown when the read fails again toasts that the state could not be read, with stderr', async ($, on) => {
+  const { ui, toasts } = await boot($, on, { acct: () => ({ exitCode: 1, stdout: '', stderr: 'no accounts.json' }) })
+  expect(await autoButton(ui)).toMatchObject({ label: 'unknown' })
+  expect(toasts).toEqual([])
+  await ui.press({ key: 'auto-place' })
+  expect(toasts).toHaveLength(1)
+  expect(toasts[0]).toMatch(/could not be read|Could not read/i)
+  expect(toasts[0]).toMatch(/no accounts\.json/)
+  expect(await autoButton(ui)).toMatchObject({ label: 'unknown' })
+  await ui.unmount()
+})
+
+test('a retry that works toasts nothing', async ($, on) => {
+  let broken = true
+  const { ui, toasts } = await boot($, on, { acct: () => (broken ? { exitCode: 1, stdout: '', stderr: 'x' } : OK('on\n')) })
+  broken = false
+  await ui.press({ key: 'auto-place' })
+  expect(toasts).toEqual([])
+  expect(await autoButton(ui)).toMatchObject({ label: 'On' })
   await ui.unmount()
 })

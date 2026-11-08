@@ -21,7 +21,7 @@ const TRACK = '#8080802e'
 // The even-pace mark: blue, so it stands out against a green, amber or red fill.
 const MARK = '#2f6fed'
 // The narrowest a bar is drawn, in percent of the pane, so a tiny plan stays visible and readable.
-const MIN_BAR = 20
+const MIN_BAR = 4
 const WINDOW_MS = { five: 5 * 3600 * 1000, seven: 7 * 86400 * 1000 }
 // The colour says the pace: what is left against how much of the window is left.
 // Ahead of an even spend is green, a little behind is amber, far behind is red.
@@ -82,17 +82,33 @@ async function readDemo($: EngineInterface): Promise<Demo | null> {
   try { return JSON.parse(await $.fs.read(`${where.home}/demo.json`)) as Demo } catch { return null }
 }
 
-async function readAuto($: EngineInterface) {
+// Every `acct auto` call (read or press) takes a number; an answer is taken only from the latest one, so a slow
+// read that comes back after a press cannot put the old state back.
+let autoSeq = 0
+const autoState = (out: string) => (out.trim() === 'on' || out.trim() === 'off' ? out.trim() : 'unknown')
+
+// Returns why the read failed (for a toast), or null when it worked or its answer was already stale.
+async function readAuto($: EngineInterface): Promise<string | null> {
+  const seq = ++autoSeq
+  const fail = async (why: string) => {
+    $.ui.log(`subscriptions: acct auto failed: ${why}`, { to: 'debug' })
+    if (seq !== autoSeq) return null
+    try {
+      await update($, autoPlace, () => 'unknown')
+    } catch (err) {
+      $.ui.log(`subscriptions: acct auto state not stored: ${String(err)}`, { to: 'debug' })
+    }
+    return why
+  }
   try {
     const { exitCode, stdout, stderr } = await $.process.run([ACCT(), 'auto'], { timeoutMs: 15000 })
-    if (exitCode === 0) await update($, autoPlace, () => stdout.trim())
-    else {
-      await update($, autoPlace, () => 'unknown')
-      $.ui.log(`subscriptions: acct auto failed: ${stderr.trim()}`, { to: 'debug' })
-    }
+    if (exitCode !== 0) return await fail(stderr.trim())
+    const state = autoState(stdout)
+    if (state === 'unknown') return await fail(`unexpected output ${JSON.stringify(stdout.trim())}`)
+    if (seq === autoSeq) await update($, autoPlace, () => state)
+    return null
   } catch (err) {
-    await update($, autoPlace, () => 'unknown')
-    $.ui.log(`subscriptions: acct auto failed: ${String(err)}`, { to: 'debug' })
+    return await fail(String(err))
   }
 }
 
@@ -205,12 +221,17 @@ export const register: Register = on => {
       }
     }
     const flipAuto = async () => {
-      if (auto === 'unknown') return readAuto($)
+      if (auto === 'unknown') {
+        const why = await readAuto($)
+        if (why != null) $.ui.toast(`Could not read the auto-placement state${why ? `: ${why}` : ''}`)
+        return
+      }
       const next = auto === 'on' ? 'off' : 'on'
+      const seq = ++autoSeq
       try {
         const { exitCode, stdout, stderr } = await $.process.run([ACCT(), 'auto', next], { timeoutMs: 15000 })
-        if (exitCode === 0) await update($, autoPlace, () => stdout.trim())
-        else $.ui.toast((stderr || stdout).trim() || `acct auto ${next} exited with code ${exitCode}`)
+        if (exitCode !== 0) $.ui.toast((stderr || stdout).trim() || `acct auto ${next} exited with code ${exitCode}`)
+        else if (seq === autoSeq) await update($, autoPlace, () => autoState(stdout))
       } catch (err) {
         $.ui.toast(`Could not change auto-placement: ${String(err)}`)
       }

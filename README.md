@@ -44,7 +44,7 @@ Set the plan of the account Claude Desktop is signed in to in `~/.claude-account
 
 | File | What |
 | --- | --- |
-| `accounts.json` | subscriptions (see `accounts.example.json`): `label`, `tokenKey`, `plan`, `proX`, optional `note`, `auto: false` to never pick it for new chats, `env`; top-level `autoPlace` (default `true`; `false` = no automatic placement of new chats, no fallback to another subscription), `rules` pin folders to an account; optional `envFile` to keep tokens in another dotenv file |
+| `accounts.json` | subscriptions (see `accounts.example.json`): `label`, `tokenKey`, `plan`, `proX`, optional `note`, `auto: false` to never pick it for new chats, `env`; top-level `autoPlace` (default `true`; `false` = no automatic placement of new chats, no fallback to another subscription), top-level `barScale` (`"adaptive"` default: each bar drawn to its plan size; `"independent"`: every bar full width, filled only relative to itself), `rules` pin folders to an account; optional `envFile` to keep tokens in another dotenv file |
 | `tokens.env` | the long-lived tokens (`CC_TOKEN_<NAME>=…`, from `claude setup-token`), mode 600 |
 | `state/` | `hook.log` (which session got which account), `launch.log`, `limits.json`, `overrides.json` |
 | `inject.js` | optional: your own script run in every page of the app |

@@ -44,6 +44,8 @@ const plans = atom({ plugin: 'subscriptions', key: 'plans' } as const, {})
 
 // `acct auto`: 'on' or 'off' (whether new chats are placed on a subscription automatically), 'unknown' when
 // reading it failed, '' until read.
+// How wide each bar is drawn (accounts.json `barScale`): "adaptive" (default) to the plan's size, "independent" every bar full width.
+const barScale = atom({ plugin: 'subscriptions', key: 'barScale' } as const, 'adaptive')
 const autoPlace = atom({ plugin: 'subscriptions', key: 'autoPlace' } as const, '')
 
 const hm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -125,9 +127,10 @@ async function probe($: EngineInterface) {
       await update($, others, () => Object.fromEntries(Object.entries(d.others).map(([k, o]) =>
         [k, { label: o.label, five: o.five, seven: o.seven, fiveReset: at(o.fiveInHours), sevenReset: at(o.sevenInHours) }])))
     }
-    const cfg = d ?? JSON.parse(await $.fs.read(ACCOUNTS())) as { accounts: Record<string, { proX?: number; plan?: string; label?: string; note?: string }> }
+    const cfg = d ?? JSON.parse(await $.fs.read(ACCOUNTS())) as { barScale?: unknown; accounts: Record<string, { proX?: number; plan?: string; label?: string; note?: string }> }
     const each = <T,>(f: (k: string, a: { proX?: number; plan?: string; label?: string; note?: string }) => T) =>
       Object.fromEntries(Object.entries(cfg.accounts).map(([k, a]) => [k, f(k, a)]))
+    await update($, barScale, () => ((cfg as { barScale?: unknown }).barScale === 'independent' ? 'independent' : 'adaptive'))
     await update($, sizes, () => Object.fromEntries(Object.entries(cfg.accounts).flatMap(([k, a]) => (a.proX == null ? [] : [[k, a.proX]]))))
     await update($, plans, () => Object.fromEntries(Object.entries(cfg.accounts).flatMap(([k, a]) => (a.plan ? [[k, a.plan]] : []))))
     await update($, labels, () => each((k, a) => a.label ?? (k === 'default' ? 'Desktop login' : k)))
@@ -193,6 +196,7 @@ export const register: Register = on => {
     const probes = await read($, others)
     const checked = await read($, checkedAt)
     const scale = await read($, sizes)
+    const independent = (await read($, barScale)) === 'independent'
     const names = await read($, labels)
     const nameOf = (k: string) => names[k] ?? k
     const noteOf = await read($, notes)
@@ -201,6 +205,7 @@ export const register: Register = on => {
     const biggest = Math.max(1, ...Object.values(scale).filter(sized))
     // A plan with no usable size in accounts.json gets the full width rather than a guess.
     const barOf = (k: string) => {
+      if (independent) return 100
       const x = scale[k]
       return sized(x) ? Math.max(MIN_BAR, Math.round((x / biggest) * 100)) : 100
     }
@@ -310,14 +315,16 @@ export const register: Register = on => {
           </Text>
           {shown !== acct && <Text size="footnote" color="warning">{`Switching to ${nameOf(shown)} when this chat is idle`}</Text>}
           {Select && choices.length > 0 && (
-            <Box flexDirection="column" gap="xs" alignItems="stretch">
+            <Box flexDirection="row" alignItems="center" gap="sm">
               <Text size="footnote" dimColor>Switch to</Text>
-              <Select
-                key="account"
-                value={shown}
-                options={choices.map(k => ({ value: k, label: nameOf(k) }))}
-                onSelect={value => { if (value !== shown) void moveHere(value)() }}
-              />
+              <Box flexGrow={1}>
+                <Select
+                  key="account"
+                  value={shown}
+                  options={choices.map(k => ({ value: k, label: nameOf(k) }))}
+                  onSelect={value => { if (value !== shown) void moveHere(value)() }}
+                />
+              </Box>
             </Box>
           )}
         </Box>

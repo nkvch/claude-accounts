@@ -22,6 +22,7 @@ declare module 'claude-code' {
       notes: Record<string, string>
       plans: Record<string, string>
       autoPlace: string
+      barScale: string
     }
   }
 }

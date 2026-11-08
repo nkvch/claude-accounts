@@ -402,3 +402,13 @@ test('a retry that works toasts nothing', async ($, on) => {
   expect(await autoButton(ui)).toMatchObject({ label: 'On' })
   await ui.unmount()
 })
+
+for (const [mode, expected] of [['independent', '100%'], ['adaptive', '50%'], ['nonsense', '50%']] as const) {
+  test(`barScale "${mode}" draws the smaller plan's bar ${expected} wide`, async ($, on) => {
+    const accounts = { barScale: mode, accounts: { default: { proX: 10, label: 'Big' }, side: { proX: 5, label: 'Side' } } }
+    const probes = { side: { label: 'Side', five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 } }
+    const { ui } = await boot($, on, { accounts, probes })
+    expect((await ui.find({ type: 'Box', key: 'track-side-7' }))?.props.width).toBe(expected)
+    await ui.unmount()
+  })
+}

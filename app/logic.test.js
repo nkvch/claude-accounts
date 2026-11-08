@@ -94,6 +94,26 @@ test("autoPlace true: a new chat is placed on the best account", () => {
   assert.strictEqual(run("s1", { chosen: new Map() }).CC_ACCOUNT, "cr");
 });
 
+test("a non-boolean autoPlace behaves as on and says so in hook.log", () => {
+  for (const bad of ["false", 0, null]) {
+    fs.rmSync(path.join(HOME, "state/hook.log"), { force: true });
+    config({ autoPlace: bad });
+    assert.strictEqual(run(`s-bad-${String(bad)}`, { chosen: new Map() }).CC_ACCOUNT, "cr");
+    const lines = fs.readFileSync(path.join(HOME, "state/hook.log"), "utf8").split("\n").filter((l) => l.includes("autoPlace"));
+    assert.ok(lines.length > 0, `no log line for ${JSON.stringify(bad)}`);
+    assert.match(lines[0], new RegExp(`autoPlace must be true or false, got ${JSON.stringify(bad)}; using the default \\(on\\)`));
+  }
+});
+
+test("a valid or missing autoPlace logs no complaint", () => {
+  for (const extra of [{}, { autoPlace: true }, { autoPlace: false }]) {
+    fs.rmSync(path.join(HOME, "state/hook.log"), { force: true });
+    config(extra);
+    run(`s-ok-${JSON.stringify(extra)}`, { chosen: new Map() });
+    assert.ok(!fs.readFileSync(path.join(HOME, "state/hook.log"), "utf8").includes("autoPlace must be"));
+  }
+});
+
 test("autoPlace false: a new chat stays on the desktop login and nothing is remembered", () => {
   config({ autoPlace: false });
   const state = { chosen: new Map() };
@@ -202,4 +222,133 @@ test("acct auto rejects a bad argument", () => {
   const r = acct(home, "auto", "maybe");
   assert.notStrictEqual(r.status, 0);
   assert.match(r.stderr, /usage/);
+});
+
+const readText = (home) => fs.readFileSync(path.join(home, "accounts.json"), "utf8");
+const tempFiles = (home) => fs.readdirSync(home).filter((f) => f.startsWith(".accounts.json."));
+
+test("acct auto keeps CRLF line endings byte for byte", () => {
+  const home = cliHome('{\r\n  "accounts": {},\r\n  "autoPlace": true\r\n}\r\n');
+  acct(home, "auto", "off");
+  assert.strictEqual(readText(home), '{\r\n  "accounts": {},\r\n  "autoPlace": false\r\n}\r\n');
+
+  const added = cliHome('{\r\n  "accounts": {}\r\n}\r\n');
+  acct(added, "auto", "off");
+  assert.strictEqual(readText(added), '{\r\n  "autoPlace": false,\r\n  "accounts": {}\r\n}\r\n');
+});
+
+test("acct auto writes through a symlinked accounts.json and keeps the link", () => {
+  const home = cliHome();
+  const realDir = fs.mkdtempSync(path.join(os.tmpdir(), "acct-real-"));
+  const target = path.join(realDir, "real.json");
+  fs.writeFileSync(target, '{\n  "autoPlace": true\n}\n');
+  fs.symlinkSync(target, path.join(home, "accounts.json"));
+  assert.strictEqual(acct(home, "auto", "off").stdout, "off\n");
+  assert.ok(fs.lstatSync(path.join(home, "accounts.json")).isSymbolicLink());
+  assert.strictEqual(fs.readFileSync(target, "utf8"), '{\n  "autoPlace": false\n}\n');
+  assert.deepStrictEqual(fs.readdirSync(realDir), ["real.json"]);
+  assert.deepStrictEqual(tempFiles(home), []);
+});
+
+test("acct auto reads and writes UTF-8 whatever the locale says", () => {
+  const home = cliHome('{\n  "accounts": { "a": { "label": "Zażółć" } }\n}\n');
+  const r = spawnSync("bash", [ACCT, "auto", "off"], {
+    env: { ...process.env, CLAUDE_ACCOUNTS_HOME: home, LC_ALL: "C", PYTHONCOERCECLOCALE: "0", PYTHONUTF8: "0" }, encoding: "utf8",
+  });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(readText(home), '{\n  "autoPlace": false,\n  "accounts": { "a": { "label": "Zażółć" } }\n}\n');
+});
+
+test("acct auto fails cleanly on content that is not UTF-8", () => {
+  const home = cliHome();
+  const bytes = Buffer.from([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]);
+  fs.writeFileSync(path.join(home, "accounts.json"), bytes);
+  for (const args of [["auto"], ["auto", "off"]]) {
+    const r = acct(home, ...args);
+    assert.notStrictEqual(r.status, 0);
+    assert.doesNotMatch(r.stderr, /Traceback/);
+    assert.match(r.stderr, /cannot read/);
+  }
+  assert.deepStrictEqual(fs.readFileSync(path.join(home, "accounts.json")), bytes);
+  assert.deepStrictEqual(fs.readdirSync(home), ["accounts.json"]);
+});
+
+test("acct auto inserts the key into a one-line file with tidy spacing", () => {
+  for (const [before, after] of [
+    ['{"accounts":{}}', '{ "autoPlace": false, "accounts":{}}'],
+    ['{ "accounts": {} }', '{ "autoPlace": false, "accounts": {} }'],
+  ]) {
+    const home = cliHome(before);
+    acct(home, "auto", "off");
+    assert.strictEqual(readText(home), after);
+  }
+});
+
+test("acct auto inserts the key with the file's own indentation", () => {
+  for (const indent of ["    ", "\t"]) {
+    const home = cliHome(`{\n${indent}"accounts": {}\n}\n`);
+    acct(home, "auto", "off");
+    assert.strictEqual(readText(home), `{\n${indent}"autoPlace": false,\n${indent}"accounts": {}\n}\n`);
+  }
+});
+
+test("acct auto keeps the file mode", () => {
+  for (const mode of [0o600, 0o640]) {
+    const home = cliHome('{"accounts":{}}');
+    const file = path.join(home, "accounts.json");
+    fs.chmodSync(file, mode);
+    acct(home, "auto", "off");
+    assert.strictEqual(fs.statSync(file).mode & 0o7777, mode);
+  }
+});
+
+test("acct auto never edits an autoPlace that is not the top-level key", () => {
+  for (const text of [
+    '{"accounts": {"autoPlace": true}, "autoPlace": true}',
+    '{"autoPlace": true, "autoPlace": false}',
+  ]) {
+    const home = cliHome(text);
+    const r = acct(home, "auto", text.includes("false") ? "on" : "off");
+    assert.notStrictEqual(r.status, 0, text);
+    assert.match(r.stderr, /could not set autoPlace/);
+    assert.strictEqual(readText(home), text);
+    assert.deepStrictEqual(tempFiles(home), []);
+  }
+});
+
+test("acct auto changes only the first occurrence of the flag when it is the right one", () => {
+  const home = cliHome('{"autoPlace": true, "x": {"autoPlace": true}}');
+  assert.strictEqual(acct(home, "auto", "off").stdout, "off\n");
+  assert.strictEqual(readText(home), '{"autoPlace": false, "x": {"autoPlace": true}}');
+
+  const quoted = cliHome('{"note": "\\"autoPlace\\": true", "autoPlace": true}');
+  assert.strictEqual(acct(quoted, "auto", "off").stdout, "off\n");
+  assert.strictEqual(readText(quoted), '{"note": "\\"autoPlace\\": true", "autoPlace": false}');
+});
+
+test("acct auto refuses a non-boolean flag and a non-object top level, file untouched", () => {
+  for (const text of ['{"autoPlace": "yes"}', '{"autoPlace": null}', '[{"autoPlace": true}]']) {
+    const home = cliHome(text);
+    for (const args of [["auto"], ["auto", "off"]]) {
+      const r = acct(home, ...args);
+      assert.notStrictEqual(r.status, 0, text);
+      assert.match(r.stderr, /autoPlace must be true or false|top level is not an object/);
+    }
+    assert.strictEqual(readText(home), text);
+    assert.deepStrictEqual(tempFiles(home), []);
+  }
+});
+
+test("acct auto off, read by logic.js from the same file: no placement; on: placement again", () => {
+  config();
+  assert.strictEqual(acct(HOME, "auto", "off").stdout, "off\n");
+  const state = { chosen: new Map() };
+  const off = run("s-int-off", state);
+  assert.strictEqual(off.CC_ACCOUNT, undefined);
+  assert.strictEqual(state.chosen.get("s-int-off"), "default");
+  assert.strictEqual(overrides()["s-int-off"], undefined);
+
+  assert.strictEqual(acct(HOME, "auto", "on").stdout, "on\n");
+  assert.strictEqual(run("s-int-on", state).CC_ACCOUNT, "cr");
+  assert.strictEqual(overrides()["s-int-on"], "cr");
 });

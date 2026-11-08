@@ -80,7 +80,11 @@ function best(cfg, now = Date.now()) {
   return top;
 }
 
-const autoPlace = (cfg) => cfg.autoPlace !== false;
+const autoPlace = (cfg) => {
+  const v = cfg.autoPlace;
+  if (v !== undefined && typeof v !== "boolean") log(`accounts.json: autoPlace must be true or false, got ${JSON.stringify(v)}; using the default (on)`);
+  return v !== false;
+};
 
 function pick(state, cfg, sessionId, cwd) {
   const overrides = readJson(OVERRIDES, {});

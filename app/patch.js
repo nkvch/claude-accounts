@@ -35,37 +35,40 @@ const chunks = fs.readdirSync(build).filter((f) => f.endsWith(".js")).map((f) =>
 const spawnFile = chunks.find((f) => fs.readFileSync(f, "utf8").includes("this.deps.buildSessionEnv("));
 if (!spawnFile) throw new Error("spawn chunk not found");
 s = fs.readFileSync(spawnFile, "utf8");
-const envM = s.match(/\{env:(\w+),secrets:\w+[^}]*\}[^;]*?=await Promise\.all\(\[this\.deps\.buildSessionEnv\((\w+),/);
+const envM = s.match(/\{env:([\w$]+),secrets:[\w$]+[^}]*\}[^;]*?=await Promise\.all\(\[[^;]*?this\.deps\.buildSessionEnv\(([\w$]+),/);
 if (!envM) throw new Error("env/session names not found");
 const [, ENV, SID] = envM;
-const cwdM = s.match(/\{cwd:(\w+),model:\w+\.model\|\|"default"/);
+const cwdM = s.match(/\{cwd:([\w$]+),model:[^,]*\|\|"default",/);
 if (!cwdM) throw new Error("cwd name not found");
 const CWD = cwdM[1];
-s = once(s, /(\w+)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOAuthToken\(/,
+s = once(s, /(?<![.\w$])([\w$]+)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOAuthToken\(/,
   `$1=(globalThis.__ccAcct?.(${SID},${CWD},${ENV}),globalThis.__ccAcctOv?.(${SID}))?void 0:this.deps.cliOAuthTokenKeeper().trackCliOAuthToken(`, "token keeper");
-s = once(s, new RegExp(`getHostAuthToken:(\\w+\\.\\w+)\\(\\{spawnEnv:${ENV},`),
+// Older bundled CLIs (< 2.1.312) get the token keeper pushed through options.getOAuthToken after the env is built.
+s = once(s, /([\w$]+\.getOAuthToken)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOAuthToken\(/,
+  `$1=globalThis.__ccAcctOv?.(${SID})?void 0:this.deps.cliOAuthTokenKeeper().trackCliOAuthToken(`, "token keeper (older CLI)");
+s = once(s, new RegExp(`getHostAuthToken:([\\w$]+\\.[\\w$]+)\\(\\{spawnEnv:${ENV.replace(/\$/g, "\\$")},`),
   `getHostAuthToken:globalThis.__ccAcctOv?.(${SID})?void 0:$1({spawnEnv:${ENV},`, "host auth");
 // One Code session folder for every login, so switching account hides nothing.
-s = once(s, /getStorageDir\(\)\{return!this\.currentAccountId\|\|!this\.currentOrgId\?null:\(0,(\w+)\.join\)\(this\.userDataPath,this\.baseDir,this\.currentAccountId,this\.currentOrgId\)\}/,
+s = once(s, /getStorageDir\(\)\{return!this\.currentAccountId\|\|!this\.currentOrgId\?null:\(0,([\w$]+)\.join\)\(this\.userDataPath,this\.baseDir,this\.currentAccountId,this\.currentOrgId\)\}/,
   "getStorageDir(){return!this.currentAccountId||!this.currentOrgId?null:(0,$1.join)(this.userDataPath,this.baseDir,...(globalThis.__ccStore?.()??[this.currentAccountId,this.currentOrgId]))}", "session store");
 // The app's own quiet restart of a session's process (used to apply a new output style:
 // waits until the session is idle, keeps typed input, no "interrupted" notice). Exposed so a
 // switch of subscription restarts the session onto it (hook.js restartPending).
-const mgrFile = chunks.find((f) => /refreshOutputStyles:\(\.\.\.(\w+)\)=>this\.refreshOutputStyles\(\.\.\.\1\)/.test(f === spawnFile ? s : fs.readFileSync(f, "utf8")));
+const mgrFile = chunks.find((f) => /refreshOutputStyles:\(\.\.\.([\w$]+)\)=>this\.refreshOutputStyles\(\.\.\.\1\)/.test(f === spawnFile ? s : fs.readFileSync(f, "utf8")));
 if (!mgrFile) throw new Error("session manager chunk not found");
 let m = mgrFile === spawnFile ? s : fs.readFileSync(mgrFile, "utf8");
-m = once(m, /refreshOutputStyles:\(\.\.\.(\w+)\)=>this\.refreshOutputStyles\(\.\.\.\1\)/,
+m = once(m, /refreshOutputStyles:\(\.\.\.([\w$]+)\)=>this\.refreshOutputStyles\(\.\.\.\1\)/,
   "refreshOutputStyles:(globalThis.__ccRestart=(sid)=>this.refreshOutputStyles(sid),(...$1)=>this.refreshOutputStyles(...$1))", "quiet restart");
 if (mgrFile === spawnFile) s = m; else fs.writeFileSync(mgrFile, m);
 fs.writeFileSync(spawnFile, s);
 
 // 3. This copy must never update itself (an update would drop the patch);
 //    build.sh rebuilds it from the official /Applications/Claude.app instead.
-const updFile = chunks.find((f) => /installed:\w+\(\),disabledByPolicy:/.test(fs.readFileSync(f, "utf8")));
+const updFile = chunks.find((f) => /installed:[\w$]+\(\),disabledByPolicy:/.test(fs.readFileSync(f, "utf8")));
 if (!updFile) throw new Error("updater chunk not found");
 s = fs.readFileSync(updFile, "utf8");
-const INSTALLED = s.match(/installed:(\w+)\(\),disabledByPolicy:/)[1];
-s = once(s, new RegExp(`function ${INSTALLED.replace("$", "\\$")}\\(\\)\\{`), `function ${INSTALLED}(){return!1;`, "updater off");
+const INSTALLED = s.match(/installed:([\w$]+)\(\),disabledByPolicy:/)[1];
+s = once(s, new RegExp(`function ${INSTALLED.replace(/\$/g, "\\$")}\\(\\)\\{`), () => `function ${INSTALLED}(){return!1;`, "updater off");
 fs.writeFileSync(updFile, s);
 
 // 4. Repack with the same files left outside the archive, and fix the integrity hash.

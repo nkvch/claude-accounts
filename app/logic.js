@@ -85,10 +85,12 @@ function pick(state, cfg, sessionId, cwd) {
   if (overrides[sessionId]) return { name: overrides[sessionId], why: "override" };
   const rec = record(cfg, sessionId);
   // A sub-session runs on its parent's subscription; remembered, so it keeps it after a restart.
+  // What the parent wants, not the fallback it was moved to meanwhile; "default" is never
+  // remembered, it would outrank the folder rules on the child's restart.
   const parent = rec?.spawnedFrom?.sessionId || rec?.dispatchParentId;
-  const inherited = parent && (state.chosen.get(parent) ?? overrides[parent]);
+  const inherited = parent && (overrides[parent] ?? state.wanted?.get(parent) ?? state.chosen.get(parent));
   if (inherited) {
-    remember(sessionId, inherited);
+    if (inherited !== "default") remember(sessionId, inherited);
     return { name: inherited, why: `parent ${parent}` };
   }
   const home = os.homedir();
@@ -116,6 +118,7 @@ exports.acct = (state, sessionId, cwd, env) => {
   if (env.CLAUDE_CODE_OAUTH_TOKEN && !env.CC_ACCOUNT) state.desktopToken = env.CLAUDE_CODE_OAUTH_TOKEN;
   const cfg = config();
   let { name, why } = pick(state, cfg, sessionId, cwd);
+  (state.wanted ??= new Map()).set(sessionId, name);
   // A subscription whose last check failed (e.g. its org turned Claude Code off) would only
   // error out; run on the best working one meanwhile. The override stays, for when it is back.
   const failed = readJson(LIMITS, {})[name];

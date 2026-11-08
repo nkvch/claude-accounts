@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 const PANE = {
   plugin: 'subscriptions', component: 'Pane', requestId: 'subscriptions',
@@ -137,5 +137,176 @@ test('the pane shows what `acct auto` reports and the switch runs the opposite c
   failNext = true
   await ui.press({ key: 'auto-place' })
   expect((await ui.find({ type: 'Button', key: 'auto-place' }))?.props).toMatchObject({ label: 'On' })
+  await ui.unmount()
+})
+
+type Run = { exitCode: number; stdout: string; stderr: string }
+type World = {
+  env?: Record<string, string>
+  accounts?: unknown
+  probes?: unknown
+  limits?: { kind: string; percentUsed: number; resetsAt: string }[]
+  acct?: (argv: string[]) => Run
+}
+const OK = (stdout: string): Run => ({ exitCode: 0, stdout, stderr: '' })
+const SEVEN = (percentUsed: number, days = 3.5) => [{ kind: 'seven_day', percentUsed, resetsAt: new Date(now + days * 864e5).toISOString() }]
+
+// Mounts the pane with scripted file and process answers; `w` is read on every call, so a test can change it between steps.
+async function boot($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1], w: World) {
+  const runs: string[][] = []
+  const toasts: string[] = []
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('env.get', (_, e) => ({ value: { ...ENV, ...w.env }[e.name] }))
+  on('session.usage', () => ({ value: { rateLimits: w.limits ?? [] } }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(w.accounts ?? ACCOUNTS) : undefined }))
+  on('ui.log', () => ({ value: undefined }))
+  on('ui.toast', (_, e) => { toasts.push(e.text); return { value: undefined } })
+  on('process.run', (_, e) => {
+    runs.push([...e.argv])
+    if (e.argv[0] === '/usr/bin/python3') return { value: OK(JSON.stringify(w.probes ?? PROBES)) }
+    return { value: w.acct ? w.acct(e.argv) : OK('this session -> x') }
+  })
+  const clock = mock.clock(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  return { ui, runs, toasts, clock }
+}
+
+test('a bar without a usable size is full width and never poisons the others', async ($, on) => {
+  const accounts = { accounts: { default: { proX: 10, label: 'Big' }, none: { label: 'None' }, junk: { proX: 'big', label: 'Junk' }, zero: { proX: 0, label: 'Zero' } } }
+  const p = (label: string) => ({ label, five: null, seven: 5, fiveReset: null, sevenReset: now + 3 * 864e5 })
+  const { ui } = await boot($, on, { accounts, probes: { none: p('None'), junk: p('Junk'), zero: p('Zero') }, limits: SEVEN(7) })
+  const width = async (key: string) => (await ui.find({ type: 'Box', key }))?.props.width
+  expect(await width('track-mine-7')).toBe('100%')
+  expect(await width('track-none-7')).toBe('100%')
+  expect(await width('track-junk-7')).toBe('100%')
+  expect(await width('track-zero-7')).toBe('100%')
+  await ui.unmount()
+})
+
+test('the current account is drawn to its own plan size too', async ($, on) => {
+  const accounts = (small: object) => ({ accounts: { default: { proX: 10, label: 'Big' }, side: { label: 'Side', ...small } } })
+  const half = await boot($, on, { env: { CC_ACCOUNT: 'side' }, accounts: accounts({ proX: 5 }), probes: {}, limits: SEVEN(7) })
+  expect((await half.ui.find({ type: 'Box', key: 'track-mine-7' }))?.props.width).toBe('50%')
+  await half.ui.unmount()
+})
+
+test('the current account without a size gets the full width', async ($, on) => {
+  const accounts = { accounts: { default: { proX: 10, label: 'Big' }, side: { label: 'Side' } } }
+  const { ui } = await boot($, on, { env: { CC_ACCOUNT: 'side' }, accounts, probes: {}, limits: SEVEN(7) })
+  expect((await ui.find({ type: 'Box', key: 'track-mine-7' }))?.props.width).toBe('100%')
+  await ui.unmount()
+})
+
+// Half of the week is left, so an even spend leaves 50%; amber starts at 70% of that.
+for (const [used, colour] of [[49, 'success'], [51, 'warning'], [64, 'warning'], [66, 'error']] as const) {
+  test(`the fill colour at ${100 - used}% left of the week with half of it to go is ${colour}`, async ($, on) => {
+    const { ui } = await boot($, on, { limits: SEVEN(used) })
+    expect((await ui.find({ type: 'Box', key: 'a' }))?.props.backgroundColor).toBe(colour)
+    await ui.unmount()
+  })
+}
+
+const autoButton = async (ui: Awaited<ReturnType<typeof boot>>['ui']) => (await ui.find({ type: 'Button', key: 'auto-place' }))?.props
+
+test('when `acct auto` cannot be read the row says unknown, has no On/Off, and pressing it reads again', async ($, on) => {
+  let broken = true
+  const { ui, runs } = await boot($, on, {
+    acct: argv => (broken ? { exitCode: 1, stdout: 'on\n', stderr: 'no accounts.json' } : OK('off\n')),
+  })
+  expect(await ui.find({ type: 'Text', text: /Auto-place new chats/ })).toBeTruthy()
+  expect(await autoButton(ui)).toMatchObject({ label: 'unknown' })
+  await ui.press({ key: 'auto-place' })
+  expect(await autoButton(ui)).toMatchObject({ label: 'unknown' })
+  broken = false
+  await ui.press({ key: 'auto-place' })
+  expect(runs.filter(a => a[0] === '/opt/ca/app/acct' && a[1] === 'auto' && a[2])).toEqual([])
+  expect(await autoButton(ui)).toMatchObject({ label: 'Off' })
+  await ui.unmount()
+})
+
+test('after a press the switch shows what `acct auto` printed, not what was asked', async ($, on) => {
+  // `acct auto off` is answered with `on`
+  const { ui } = await boot($, on, { acct: () => OK('on\n') })
+  expect(await autoButton(ui)).toMatchObject({ label: 'On' })
+  await ui.press({ key: 'auto-place' })
+  expect(await autoButton(ui)).toMatchObject({ label: 'On' })
+  await ui.unmount()
+})
+
+test('a failed press toasts the error text and leaves the switch where it was', async ($, on) => {
+  let fail = false
+  const { ui, toasts } = await boot($, on, {
+    acct: argv => (fail && argv[2] ? { exitCode: 1, stdout: '', stderr: 'accounts.json is read-only' } : OK('on\n')),
+  })
+  fail = true
+  await ui.press({ key: 'auto-place' })
+  expect(toasts).toEqual(['accounts.json is read-only'])
+  expect(await autoButton(ui)).toMatchObject({ label: 'On' })
+  await ui.unmount()
+})
+
+test('a failed press with no output at all still says which command failed and how', async ($, on) => {
+  let fail = false
+  const { ui, toasts } = await boot($, on, {
+    acct: argv => (fail && argv[2] ? { exitCode: 3, stdout: '', stderr: '' } : OK('on\n')),
+  })
+  fail = true
+  await ui.press({ key: 'auto-place' })
+  expect(toasts).toHaveLength(1)
+  expect(toasts[0]).toMatch(/auto off/)
+  expect(toasts[0]).toMatch(/3/)
+  await ui.unmount()
+})
+
+test('the dropdown always lists the current and the picked account, even when accounts.json does not name them', async ($, on) => {
+  const w: World = { env: { CC_ACCOUNT: 'ghost' }, accounts: { accounts: { default: { label: 'Work' }, personal: { label: 'Personal' } } }, probes: {}, acct: () => OK('this session -> personal') }
+  const { ui, clock } = await boot($, on, w)
+  const values = async () => ((await ui.find({ type: 'Select', key: 'account' }))?.props.options as { value: string }[]).map(o => o.value).sort()
+  expect(await values()).toEqual(['default', 'ghost', 'personal'])
+  await ui.select({ key: 'account', value: 'personal' })
+  await clock.advance(20 * 1000)
+  w.accounts = { accounts: { default: { label: 'Work' } } }
+  await clock.advance(20 * 1000)
+  expect(await values()).toEqual(['default', 'ghost', 'personal'])
+  await ui.unmount()
+})
+
+test('a failed `acct <name>` toasts the error and leaves the pick where it was', async ($, on) => {
+  const answers: Run[] = [
+    { exitCode: 1, stdout: '', stderr: 'no such account' },
+    { exitCode: 1, stdout: 'this session -> personal', stderr: 'boom' },
+    OK('nothing to do'),
+  ]
+  const { ui, toasts } = await boot($, on, { acct: argv => (argv[1] === 'auto' ? OK('on\n') : answers.shift() ?? OK(''))  })
+  for (let i = 0; i < 3; i++) {
+    await ui.select({ key: 'account', value: 'personal' })
+    expect((await ui.find({ type: 'Select', key: 'account' }))?.props).toMatchObject({ value: 'default' })
+  }
+  expect(toasts).toEqual(['no such account', 'boom', 'nothing to do'])
+  expect(await ui.find({ type: 'Text', text: /Switching to/ })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('a chat on a non-default account lists the other subscriptions even before any probe came back', async ($, on) => {
+  const { ui } = await boot($, on, { env: { CC_ACCOUNT: 'personal' }, probes: {} })
+  expect(await ui.find({ type: 'Text', text: /Other subscriptions/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /No fresh numbers yet/ })).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a change of accounts.json made elsewhere is picked up by the watcher, including the auto-place state', async ($, on) => {
+  let state = 'on'
+  const w: World = { acct: () => OK(`${state}\n`) }
+  const { ui, clock } = await boot($, on, w)
+  expect(await autoButton(ui)).toMatchObject({ label: 'On' })
+  await clock.advance(20 * 1000)
+  state = 'off'
+  w.accounts = { accounts: { default: { label: 'Work' } } }
+  await clock.advance(20 * 1000)
+  expect(await autoButton(ui)).toMatchObject({ label: 'Off' })
   await ui.unmount()
 })

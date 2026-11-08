@@ -42,7 +42,8 @@ const notes = atom({ plugin: 'subscriptions', key: 'notes' } as const, {})
 // Each account's plan name (accounts.json `plan`, e.g. "Pro", "Ultra").
 const plans = atom({ plugin: 'subscriptions', key: 'plans' } as const, {})
 
-// `acct auto`: 'on' or 'off' (whether new chats are placed on a subscription automatically), '' until read.
+// `acct auto`: 'on' or 'off' (whether new chats are placed on a subscription automatically), 'unknown' when
+// reading it failed, '' until read.
 const autoPlace = atom({ plugin: 'subscriptions', key: 'autoPlace' } as const, '')
 
 const hm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -59,7 +60,10 @@ let seenAccounts = ''
 async function watchAccounts($: EngineInterface) {
   try {
     const text = await $.fs.read(ACCOUNTS())
-    if (seenAccounts && text !== seenAccounts) void probe($)
+    if (seenAccounts && text !== seenAccounts) {
+      void probe($)
+      void readAuto($)
+    }
     seenAccounts = text
   } catch {}
 }
@@ -82,8 +86,12 @@ async function readAuto($: EngineInterface) {
   try {
     const { exitCode, stdout, stderr } = await $.process.run([ACCT(), 'auto'], { timeoutMs: 15000 })
     if (exitCode === 0) await update($, autoPlace, () => stdout.trim())
-    else $.ui.log(`subscriptions: acct auto failed: ${stderr.trim()}`, { to: 'debug' })
+    else {
+      await update($, autoPlace, () => 'unknown')
+      $.ui.log(`subscriptions: acct auto failed: ${stderr.trim()}`, { to: 'debug' })
+    }
   } catch (err) {
+    await update($, autoPlace, () => 'unknown')
     $.ui.log(`subscriptions: acct auto failed: ${String(err)}`, { to: 'debug' })
   }
 }
@@ -173,9 +181,13 @@ export const register: Register = on => {
     const nameOf = (k: string) => names[k] ?? k
     const noteOf = await read($, notes)
     const planNames = await read($, plans)
-    const biggest = Math.max(1, ...Object.values(scale))
-    // A plan with no size in accounts.json gets the full width rather than a guess.
-    const barOf = (k: string) => (scale[k] == null ? 100 : Math.max(MIN_BAR, Math.round((scale[k] / biggest) * 100)))
+    const sized = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0
+    const biggest = Math.max(1, ...Object.values(scale).filter(sized))
+    // A plan with no usable size in accounts.json gets the full width rather than a guess.
+    const barOf = (k: string) => {
+      const x = scale[k]
+      return sized(x) ? Math.max(MIN_BAR, Math.round((x / biggest) * 100)) : 100
+    }
     // "Ultra · 10x", "Pro", "10x" or nothing: only what accounts.json says.
     const planOf = (k: string) => [planNames[k], scale[k] != null ? `${scale[k]}x` : ''].filter(Boolean).join(' · ')
 
@@ -184,8 +196,8 @@ export const register: Register = on => {
     const now = Date.now()
     const moveHere = (name: string) => async () => {
       try {
-        const { stdout, stderr } = await $.process.run([ACCT(), name], { timeoutMs: 15000 })
-        const moved = stdout.includes('->')
+        const { exitCode, stdout, stderr } = await $.process.run([ACCT(), name], { timeoutMs: 15000 })
+        const moved = exitCode === 0 && stdout.includes('->')
         if (moved) await update($, picked, () => name)
         $.ui.toast(moved ? `Switching this chat to ${nameOf(name)}: it restarts on it as soon as it is idle.` : (stderr || stdout).trim())
       } catch (err) {
@@ -193,11 +205,12 @@ export const register: Register = on => {
       }
     }
     const flipAuto = async () => {
+      if (auto === 'unknown') return readAuto($)
       const next = auto === 'on' ? 'off' : 'on'
       try {
         const { exitCode, stdout, stderr } = await $.process.run([ACCT(), 'auto', next], { timeoutMs: 15000 })
         if (exitCode === 0) await update($, autoPlace, () => stdout.trim())
-        else $.ui.toast((stderr || stdout).trim())
+        else $.ui.toast((stderr || stdout).trim() || `acct auto ${next} exited with code ${exitCode}`)
       } catch (err) {
         $.ui.toast(`Could not change auto-placement: ${String(err)}`)
       }
@@ -306,7 +319,7 @@ export const register: Register = on => {
         {auto && (
           <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
             <Text size="footnote" dimColor>Auto-place new chats</Text>
-            <Button key="auto-place" label={auto === 'on' ? 'On' : 'Off'} variant="secondary" onPress={flipAuto} />
+            <Button key="auto-place" label={auto === 'on' ? 'On' : auto === 'off' ? 'Off' : 'unknown'} variant="secondary" onPress={flipAuto} />
           </Box>
         )}
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">

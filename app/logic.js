@@ -80,6 +80,8 @@ function best(cfg, now = Date.now()) {
   return top;
 }
 
+const autoPlace = (cfg) => cfg.autoPlace !== false;
+
 function pick(state, cfg, sessionId, cwd) {
   const overrides = readJson(OVERRIDES, {});
   if (overrides[sessionId]) return { name: overrides[sessionId], why: "override" };
@@ -99,8 +101,9 @@ function pick(state, cfg, sessionId, cwd) {
     if (cwd && (cwd === dir || cwd.startsWith(dir + path.sep))) return { name: r.account, why: `rule ${r.folder}` };
   }
   // Only a new chat is placed automatically; an older one keeps running where it was.
+  // With `autoPlace: false` in accounts.json nothing is placed: a new chat stays on the desktop login.
   const isNew = !rec || Date.now() - (rec.createdAt || 0) < NEW_SESSION_MS;
-  if (isNew) {
+  if (autoPlace(cfg) && isNew) {
     const top = best(cfg);
     if (top) {
       remember(sessionId, top.name);
@@ -120,12 +123,13 @@ exports.acct = (state, sessionId, cwd, env) => {
   let { name, why } = pick(state, cfg, sessionId, cwd);
   (state.wanted ??= new Map()).set(sessionId, name);
   // A subscription whose last check failed (e.g. its org turned Claude Code off) would only
-  // error out; run on the best working one meanwhile. The override stays, for when it is back.
+  // error out; run on the best working one (the desktop login when `autoPlace` is off) meanwhile.
+  // The override stays, for when it is back.
   const failed = readJson(LIMITS, {})[name];
   // A network error of the probe (TypeError = fetch failed, e.g. right after the Mac wakes) says nothing about the account.
   const transient = ["TypeError", "TimeoutError", "AbortError"].includes(failed?.error);
   if (name !== "default" && failed?.error && !transient && Date.now() - failed.at < LIMITS_FRESH_MS) {
-    const top = best(cfg);
+    const top = autoPlace(cfg) ? best(cfg) : undefined;
     why = `${name} unavailable (${failed.error}), using ${top ? top.name : "default"}; was ${why}`;
     name = top ? top.name : "default";
   }

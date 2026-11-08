@@ -2,8 +2,60 @@
 # acct            -> show this session's subscription
 # acct <name>     -> run this session on <name> (a key of accounts.json); the app restarts the
 #                    session's process quietly as soon as it is idle (hook.js restartPending)
+# acct auto       -> on|off: whether new chats are placed on a subscription automatically
+# acct auto on|off -> set `autoPlace` in accounts.json; the next new chat follows it
 HOME_DIR="${CLAUDE_ACCOUNTS_HOME:-$HOME/.claude-accounts}"
 SID="${CLAUDE_CODE_HOST_SESSION_ID:-}"
+if [ "${1:-}" = "auto" ]; then
+  /usr/bin/python3 - "$HOME_DIR" "${2:-}" <<'PYAUTO'
+import json, os, re, sys, tempfile
+home, arg = sys.argv[1:]
+if arg not in ("", "on", "off"):
+    sys.exit("usage: acct auto [on|off]")
+p = os.path.join(home, "accounts.json")
+try:
+    text = open(p).read()
+    cfg = json.loads(text)
+except (OSError, ValueError) as e:
+    sys.exit(f"cannot read {p}: {e}")
+if not isinstance(cfg, dict):
+    sys.exit(f"{p}: top level is not an object")
+current = cfg.get("autoPlace", True)
+if not isinstance(current, bool):
+    sys.exit(f"{p}: autoPlace must be true or false, got {current!r}")
+if not arg:
+    print("on" if current else "off"); sys.exit(0)
+want = arg == "on"
+lit = "true" if want else "false"
+if "autoPlace" in cfg:
+    new = re.sub(r'("autoPlace"\s*:\s*)(true|false)', lambda m: m.group(1) + lit, text, count=1)
+else:
+    m = re.match(r'(\s*\{)(\s*)', text)
+    gap = m.group(2)
+    if cfg:
+        indent = gap if "\n" in gap else " "
+        new = text[:m.end(1)] + f'{indent}"autoPlace": {lit},' + text[m.end(1):]
+    else:
+        new = text[:m.end(1)] + f'"autoPlace": {lit}' + text[m.end(1):]
+try:
+    check = json.loads(new)
+except ValueError:
+    check = None
+if check != {**cfg, "autoPlace": want}:
+    sys.exit(f"{p}: could not set autoPlace without changing other content; edit it by hand")
+fd, tmp = tempfile.mkstemp(dir=home, prefix=".accounts.json.")
+try:
+    with os.fdopen(fd, "w") as f:
+        f.write(new)
+    os.chmod(tmp, os.stat(p).st_mode & 0o7777)
+    os.replace(tmp, p)
+except OSError as e:
+    if os.path.exists(tmp): os.unlink(tmp)
+    sys.exit(f"cannot write {p}: {e}")
+print("on" if want else "off")
+PYAUTO
+  exit $?
+fi
 [ -n "$SID" ] || { echo "not inside a Claude Desktop Code session"; exit 1; }
 if [ -z "${1:-}" ]; then
   echo "now: ${CC_ACCOUNT:-default}"; exit 0

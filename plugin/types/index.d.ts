@@ -20,6 +20,7 @@ declare module 'claude-code' {
       sizes: Record<string, number>
       labels: Record<string, string>
       notes: Record<string, string>
+      plans: Record<string, string>
     }
   }
 }

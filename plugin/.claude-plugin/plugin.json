@@ -1,1 +1,1 @@
-{ "name": "subscriptions", "version": "0.6.0", "description": "Pane with each Claude subscription: what is left of its limits, drawn to plan size against an even pace; a dropdown to move the chat onto another subscription; Add subscription", "types": "./types/index.d.ts" }
+{ "name": "subscriptions", "version": "0.7.0", "description": "Pane with each Claude subscription: what is left of its limits, against an even pace; a dropdown to move the chat onto another subscription; Add subscription", "types": "./types/index.d.ts" }

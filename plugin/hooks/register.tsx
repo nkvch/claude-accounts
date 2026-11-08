@@ -32,11 +32,13 @@ const picked = atom({ plugin: 'subscriptions', key: 'picked' } as const, 'defaul
 const mine = atom({ plugin: 'subscriptions', key: 'mine' } as const, [])
 const others = atom({ plugin: 'subscriptions', key: 'others' } as const, {})
 const checkedAt = atom({ plugin: 'subscriptions', key: 'checkedAt' } as const, 0)
-// Each plan's size in "times Pro usage per week" (accounts.json `proX`): bars are drawn to scale.
+// Each plan's size in "times Pro usage per week" (accounts.json `proX`), shown as text next to the name.
 const sizes = atom({ plugin: 'subscriptions', key: 'sizes' } as const, {})
 // Each account's name and an optional note under it (accounts.json `label`, `note`).
 const labels = atom({ plugin: 'subscriptions', key: 'labels' } as const, {})
 const notes = atom({ plugin: 'subscriptions', key: 'notes' } as const, {})
+// Each account's plan name (accounts.json `plan`, e.g. "Pro", "Ultra").
+const plans = atom({ plugin: 'subscriptions', key: 'plans' } as const, {})
 
 const hm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 // 16:00 · Wed 03:00
@@ -61,7 +63,7 @@ async function watchAccounts($: EngineInterface) {
 // demo.example.json; reset times are given in hours from now, so a screenshot always looks right).
 type Demo = {
   account: string
-  accounts: Record<string, { proX?: number; label?: string; note?: string }>
+  accounts: Record<string, { proX?: number; plan?: string; label?: string; note?: string }>
   mine: { kind: string; percentUsed: number; resetsInHours: number }[]
   others: Record<string, { label: string; five: number | null; seven: number; fiveInHours?: number; sevenInHours: number }>
 }
@@ -84,10 +86,11 @@ async function probe($: EngineInterface) {
       await update($, others, () => Object.fromEntries(Object.entries(d.others).map(([k, o]) =>
         [k, { label: o.label, five: o.five, seven: o.seven, fiveReset: at(o.fiveInHours), sevenReset: at(o.sevenInHours) }])))
     }
-    const cfg = d ?? JSON.parse(await $.fs.read(ACCOUNTS())) as { accounts: Record<string, { proX?: number; label?: string; note?: string }> }
-    const each = <T,>(f: (k: string, a: { proX?: number; label?: string; note?: string }) => T) =>
+    const cfg = d ?? JSON.parse(await $.fs.read(ACCOUNTS())) as { accounts: Record<string, { proX?: number; plan?: string; label?: string; note?: string }> }
+    const each = <T,>(f: (k: string, a: { proX?: number; plan?: string; label?: string; note?: string }) => T) =>
       Object.fromEntries(Object.entries(cfg.accounts).map(([k, a]) => [k, f(k, a)]))
-    await update($, sizes, () => each((_, a) => a.proX ?? 1))
+    await update($, sizes, () => Object.fromEntries(Object.entries(cfg.accounts).flatMap(([k, a]) => (a.proX == null ? [] : [[k, a.proX]]))))
+    await update($, plans, () => Object.fromEntries(Object.entries(cfg.accounts).flatMap(([k, a]) => (a.plan ? [[k, a.plan]] : []))))
     await update($, labels, () => each((k, a) => a.label ?? (k === 'default' ? 'Desktop login' : k)))
     await update($, notes, () => each((_, a) => a.note ?? ''))
     if (!d) {
@@ -153,7 +156,9 @@ export const register: Register = on => {
     const names = await read($, labels)
     const nameOf = (k: string) => names[k] ?? k
     const noteOf = await read($, notes)
-    const biggest = Math.max(1, ...Object.values(scale))
+    const planNames = await read($, plans)
+    // "Ultra · 10x", "Pro", "10x" or nothing: only what accounts.json says.
+    const planOf = (k: string) => [planNames[k], scale[k] != null ? `${scale[k]}x` : ''].filter(Boolean).join(' · ')
 
     const now = Date.now()
     const moveHere = (name: string) => async () => {
@@ -172,37 +177,43 @@ export const register: Register = on => {
       $.ui.toast('Follow the dialogs to add a subscription.')
     }
 
-    // One limit as what is left: the bar is drawn to the plan's size, filled with what is left,
-    // and a thin mark stands where an even spend would be now (the share of the window still to go).
+    // One limit as what is left: the percent on the left, the window and its reset above a full-width bar
+    // filled with what is left; a thin mark stands where an even spend would be now (the share of the window still to go).
     const meter = (key: string, label: string, pct: number | null | undefined, reset: number | null | undefined,
-      size: number, windowMs: number) => {
+      windowMs: number) => {
       const left = 100 - Math.max(0, Math.min(100, Math.round(pct ?? 0)))
       const timeLeft = reset ? Math.max(0, Math.min(100, Math.round(((reset - now) / windowMs) * 100))) : 100
       const note = reset ? `resets ${when(reset)}` : 'window not started'
       const fill = pace(left, timeLeft)
       const seg = (k: string, w: number, color: string) => w > 0 && <Box key={k} width={`${w}%`} height={1} backgroundColor={color} />
       return (
-        <Box key={key} flexDirection="column" gap="xs">
-          <Box flexDirection="row" justifyContent="space-between" gap="sm">
-            <Text size="footnote">{label}</Text>
-            <Text size="footnote" tabular>
-              <Text weight="semibold">{`${left}% left`}</Text>
-              <Text dimColor>{`  ${note}`}</Text>
-            </Text>
+        <Box key={key} flexDirection="row" alignItems="center" gap="md">
+          <Box width={7} justifyContent="flex-end">
+            <Text size="heading" weight="semibold" tabular>{`${left}%`}</Text>
           </Box>
-          <Box flexDirection="row" height={1} width={`${Math.round((size / biggest) * 100)}%`} backgroundColor={TRACK}>
-            {left >= timeLeft
-              ? [seg('a', timeLeft, fill), <Box key="m" width="2%" height={1} backgroundColor={MARK} />, seg('b', left - timeLeft, fill)]
-              : [seg('a', left, fill), seg('b', timeLeft - left, TRACK), <Box key="m" width="2%" height={1} backgroundColor={MARK} />]}
+          <Box flexDirection="column" gap="xs" flexGrow={1}>
+            <Box flexDirection="row" justifyContent="space-between" gap="sm">
+              <Text size="footnote" weight="semibold">{label}</Text>
+              <Text size="footnote" tabular dimColor>{note}</Text>
+            </Box>
+            <Box flexDirection="row" height={1} width="100%" backgroundColor={TRACK}>
+              {left >= timeLeft
+                ? [seg('a', timeLeft, fill), <Box key="m" width="2%" height={1} backgroundColor={MARK} />, seg('b', left - timeLeft, fill)]
+                : [seg('a', left, fill), seg('b', timeLeft - left, TRACK), <Box key="m" width="2%" height={1} backgroundColor={MARK} />]}
+            </Box>
           </Box>
         </Box>
       )
     }
 
-    // An account's name and what it is. Where there is no Select (mobile), a button moves this chat onto it.
+    // An account's name, plan and note. Where there is no Select (mobile), a button moves this chat onto it.
     const accountHead = (name: string, label: string) => (
-      <Box flexDirection="row" justifyContent="space-between" gap="sm">
-        <Text weight="semibold">{label}{noteOf[name] ? <Text weight="regular" size="footnote" dimColor>{`  ${noteOf[name]}`}</Text> : ''}</Text>
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
+        <Text weight="semibold">
+          {label}
+          {planOf(name) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(name)}`}</Text> : ''}
+          {noteOf[name] ? <Text weight="regular" size="footnote" dimColor>{`  ${noteOf[name]}`}</Text> : ''}
+        </Text>
         {!Select && <Button key={`move-${name}`} label="Move chat here" variant="secondary" onPress={moveHere(name)} />}
       </Box>
     )
@@ -216,34 +227,39 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap="lg">
         <Box flexDirection="column" gap="sm">
-          <Text size="heading" weight="semibold">
-            {nameOf(acct)}<Text weight="regular" dimColor>  this chat</Text>
-          </Text>
+          <Box flexDirection="column">
+            <Text size="footnote" dimColor>This chat runs on</Text>
+            <Text size="heading" weight="semibold">
+              {nameOf(acct)}
+              {planOf(acct) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(acct)}`}</Text> : ''}
+            </Text>
+          </Box>
+          {shown !== acct && <Text size="footnote" color="warning">{`Switching to ${nameOf(shown)} when this chat is idle`}</Text>}
           {Select && choices.length > 0 && (
             <Select
               key="account"
-              label="Subscription"
+              label="Switch to"
               value={shown}
               options={choices.map(k => ({ value: k, label: nameOf(k) }))}
               onSelect={value => { if (value !== shown) void moveHere(value)() }}
             />
           )}
           {five || seven
-            ? [five && meter('mine-5', '5 hours', five.percentUsed, isoMs(five.resetsAt), scale[acct] ?? 1, WINDOW_MS.five),
-               seven && meter('mine-7', 'Week', seven.percentUsed, isoMs(seven.resetsAt), scale[acct] ?? 1, WINDOW_MS.seven)]
+            ? [five && meter('mine-5', '5 hours', five.percentUsed, isoMs(five.resetsAt), WINDOW_MS.five),
+               seven && meter('mine-7', 'Week', seven.percentUsed, isoMs(seven.resetsAt), WINDOW_MS.seven)]
             : <Text size="footnote" dimColor>Numbers appear after the first reply.</Text>}
         </Box>
 
         {hasRest && (
           <Box flexDirection="column" gap="md">
-            <Text size="heading" weight="semibold">Others</Text>
+            <Text size="footnote" dimColor>Other subscriptions</Text>
             {rest.map(([name, p]) => (
               <Box key={`acct-${name}`} flexDirection="column" gap="sm">
                 {accountHead(name, nameOf(name))}
                 {p.error
                   ? <Text size="footnote" dimColor>{`Couldn't check: ${p.error}`}</Text>
-                  : [p.five != null && meter(`${name}-5`, '5 hours', p.five, p.fiveReset, scale[name] ?? 1, WINDOW_MS.five),
-                     meter(`${name}-7`, 'Week', p.seven, p.sevenReset, scale[name] ?? 1, WINDOW_MS.seven)]}
+                  : [p.five != null && meter(`${name}-5`, '5 hours', p.five, p.fiveReset, WINDOW_MS.five),
+                     meter(`${name}-7`, 'Week', p.seven, p.sevenReset, WINDOW_MS.seven)]}
               </Box>
             ))}
             {acct !== 'default' && !probes.default && names.default !== undefined && (

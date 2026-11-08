@@ -10,7 +10,7 @@ out and in all day or run two apps. claude-accounts runs a patched copy of Claud
 per Code session, swaps in another subscription's long-lived token, and adds a **Subscriptions**
 pane next to the chat:
 
-- what is left of each subscription's 5-hour and weekly limit, each bar drawn to the plan's size,
+- what is left of each subscription's 5-hour and weekly limit, a big percent left per window over a full-width bar,
   with a blue mark where an even spend would be now (green ahead of that pace, amber a little
   behind, red far behind);
 - **dropdown** — pick a subscription and the chat restarts on it as soon as it is idle (the app's

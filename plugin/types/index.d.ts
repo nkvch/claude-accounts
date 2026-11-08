@@ -13,12 +13,14 @@ declare module 'claude-code' {
   interface PluginState {
     subscriptions: {
       account: string
+      picked: string
       mine: Window[]
       others: Record<string, Probe>
       checkedAt: number
       sizes: Record<string, number>
       labels: Record<string, string>
       notes: Record<string, string>
+      plans: Record<string, string>
     }
   }
 }

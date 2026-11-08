@@ -10,10 +10,10 @@ const PROBES = {
   personal: { label: 'Personal', five: null, seven: 10, fiveReset: null, sevenReset: now + 3 * 864e5 },
   side: { label: 'Side project', five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 },
 }
-const ACCOUNTS = { accounts: { default: { proX: 6.25, label: 'Work' }, personal: { proX: 10, label: 'Personal' }, side: { proX: 5, label: 'Side project', note: 'used by the bot' } } }
+const ACCOUNTS = { accounts: { default: { proX: 6.25, label: 'Work' }, personal: { proX: 10, plan: 'Ultra', label: 'Personal' }, side: { proX: 5, label: 'Side project', note: 'used by the bot' } } }
 const ENV: Record<string, string> = { CLAUDE_ACCOUNTS_APP: '/opt/ca/app', CLAUDE_ACCOUNTS_HOME: '/home/.claude-accounts' }
 
-test('each subscription shows what is left and a button moves the chat onto it', async ($, on) => {
+test('each subscription shows what is left and the dropdown moves the chat onto the picked one', async ($, on) => {
   const runs: string[][] = []
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -30,12 +30,28 @@ test('each subscription shows what is left and a button moves the chat onto it',
   await new Promise(r => setTimeout(r, 50))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /71% left/ }))?.text).toMatch(/71% left/)
-  expect((await ui.find({ type: 'Text', text: /90% left/ }))?.text).toMatch(/90% left/)
+  expect((await ui.find({ type: 'Text', text: /^71%$/ }))?.text).toMatch(/^71%$/)
+  expect((await ui.find({ type: 'Text', text: /^90%$/ }))?.text).toMatch(/^90%$/)
   expect((await ui.find({ type: 'Text', text: /used by/ }))?.text).toMatch(/used by the bot/)
   expect(await ui.find({ type: 'Button', key: 'add-subscription' })).toBeTruthy()
-  await ui.press({ key: 'move-personal' })
-  expect(runs.some(a => a[0] === '/opt/ca/app/acct' && a[1] === 'personal')).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /This chat runs on/ })).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /^Work/ }))?.text).toMatch(/^Work\s+6\.25x/)
+  expect(await ui.find({ type: 'Text', text: /Switching to/ })).toBeFalsy()
+  expect((await ui.find({ type: 'Text', text: /Ultra · 10x/ }))?.text).toMatch(/Personal\s+Ultra · 10x/)
+  expect(await ui.find({ type: 'Button', key: 'move-personal' })).toBeFalsy()
+  const picker = await ui.find({ type: 'Select', key: 'account' })
+  expect(picker?.props).toMatchObject({ value: 'default', options: [{ value: 'default' }, { value: 'personal' }, { value: 'side' }] })
+  const acctRuns = () => runs.filter(a => a[0] === '/opt/ca/app/acct')
+  await ui.select({ key: 'account', value: 'default' })
+  expect(acctRuns()).toEqual([])
+  await ui.select({ key: 'account', value: 'personal' })
+  expect(acctRuns()).toEqual([['/opt/ca/app/acct', 'personal']])
+  expect((await ui.find({ type: 'Select', key: 'account' }))?.props).toMatchObject({ value: 'personal' })
+  expect((await ui.find({ type: 'Text', text: /Switching to/ }))?.text).toMatch(/Switching to Personal when this chat is idle/)
+  expect((await ui.find({ type: 'Text', text: /^Work/ }))?.text).toMatch(/^Work/)
+  await ui.select({ key: 'account', value: 'default' })
+  expect(acctRuns()).toEqual([['/opt/ca/app/acct', 'personal'], ['/opt/ca/app/acct', 'default']])
+  expect(await ui.find({ type: 'Text', text: /Switching to/ })).toBeFalsy()
   await ui.unmount()
 })
 
@@ -57,8 +73,33 @@ test('a demo.json in the config folder replaces every name and number', async ($
   await new Promise(r => setTimeout(r, 50))
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /59% left/ }))?.text).toMatch(/59% left/)
-  expect((await ui.find({ type: 'Text', text: /78% left/ }))?.text).toMatch(/78% left/)
+  expect((await ui.find({ type: 'Text', text: /^59%$/ }))?.text).toMatch(/^59%$/)
+  expect((await ui.find({ type: 'Text', text: /^78%$/ }))?.text).toMatch(/^78%$/)
   expect(await ui.find({ type: 'Text', text: /Side project/ })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('each bar is drawn to its plan size: twice the plan, twice the width, the biggest fills the track', async ($, on) => {
+  const accounts = { accounts: { default: { proX: 10, label: 'Big' }, side: { proX: 5, label: 'Side' }, tiny: { proX: 0.1, label: 'Tiny' } } }
+  const probes = {
+    side: { label: 'Side', five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 },
+    tiny: { label: 'Tiny', five: 5, seven: 5, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 },
+  }
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('env.get', (_, e) => ({ value: ENV[e.name] }))
+  on('session.usage', () => ({ value: { rateLimits: [{ kind: 'seven_day', percentUsed: 7, resetsAt: new Date(now + 6 * 864e5).toISOString() }] } }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(accounts) : undefined }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify(probes), stderr: '' } }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await new Promise(r => setTimeout(r, 50))
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const width = async (key: string) => (await ui.find({ type: 'Box', key }))?.props.width
+  expect(await width('track-mine-7')).toBe('100%')
+  expect(await width('track-side-7')).toBe('50%')
+  expect(await width('track-side-5')).toBe('50%')
+  expect(await width('track-tiny-7')).toBe('20%')
   await ui.unmount()
 })

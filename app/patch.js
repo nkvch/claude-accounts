@@ -41,9 +41,9 @@ const [, ENV, SID] = envM;
 const cwdM = s.match(/\{cwd:(\w+),model:\w+\.model\|\|"default"/);
 if (!cwdM) throw new Error("cwd name not found");
 const CWD = cwdM[1];
-s = once(s, /(\w+)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOAuthToken\(/,
+s = once(s, /(?<![.\w])(\w+)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOAuthToken\(/,
   `$1=(globalThis.__ccAcct?.(${SID},${CWD},${ENV}),globalThis.__ccAcctOv?.(${SID}))?void 0:this.deps.cliOAuthTokenKeeper().trackCliOAuthToken(`, "token keeper");
-s = once(s, new RegExp(`getHostAuthToken:(\\w+\\.\\w+)\\(\\{spawnEnv:${ENV},`),
+s = once(s, new RegExp(`getHostAuthToken:([\\w$]+\\.[\\w$]+)\\(\\{spawnEnv:${ENV},`),
   `getHostAuthToken:globalThis.__ccAcctOv?.(${SID})?void 0:$1({spawnEnv:${ENV},`, "host auth");
 // One Code session folder for every login, so switching account hides nothing.
 s = once(s, /getStorageDir\(\)\{return!this\.currentAccountId\|\|!this\.currentOrgId\?null:\(0,(\w+)\.join\)\(this\.userDataPath,this\.baseDir,this\.currentAccountId,this\.currentOrgId\)\}/,

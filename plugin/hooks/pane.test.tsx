@@ -41,7 +41,7 @@ test('each subscription shows what is left and the dropdown moves the chat onto 
   expect(await ui.find({ type: 'Button', key: 'move-personal' })).toBeFalsy()
   const picker = await ui.find({ type: 'Select', key: 'account' })
   expect(picker?.props).toMatchObject({ value: 'default', options: [{ value: 'default' }, { value: 'personal' }, { value: 'side' }] })
-  const acctRuns = () => runs.filter(a => a[0] === '/opt/ca/app/acct')
+  const acctRuns = () => runs.filter(a => a[0] === '/opt/ca/app/acct' && a[1] !== 'auto')
   await ui.select({ key: 'account', value: 'default' })
   expect(acctRuns()).toEqual([])
   await ui.select({ key: 'account', value: 'personal' })
@@ -101,5 +101,41 @@ test('each bar is drawn to its plan size: twice the plan, twice the width, the b
   expect(await width('track-side-7')).toBe('50%')
   expect(await width('track-side-5')).toBe('50%')
   expect(await width('track-tiny-7')).toBe('20%')
+  await ui.unmount()
+})
+
+test('the pane shows what `acct auto` reports and the switch runs the opposite command', async ($, on) => {
+  const runs: string[][] = []
+  let state = 'on'
+  let failNext = false
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('env.get', (_, e) => ({ value: ENV[e.name] }))
+  on('session.usage', () => ({ value: { rateLimits: [] } }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(ACCOUNTS) : undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', (_, e) => {
+    runs.push([...e.argv])
+    if (e.argv[0] === '/usr/bin/python3') return { value: { exitCode: 0, stdout: JSON.stringify(PROBES), stderr: '' } }
+    if (failNext && e.argv[2]) return { value: { exitCode: 1, stdout: '', stderr: 'accounts.json is read-only' } }
+    if (e.argv[2]) state = e.argv[2]
+    return { value: { exitCode: 0, stdout: `${state}\n`, stderr: '' } }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await new Promise(r => setTimeout(r, 50))
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /Auto-place new chats/ })).toBeTruthy()
+  expect((await ui.find({ type: 'Button', key: 'auto-place' }))?.props).toMatchObject({ label: 'On' })
+  await ui.press({ key: 'auto-place' })
+  expect(runs.filter(a => a[2])).toEqual([['/opt/ca/app/acct', 'auto', 'off']])
+  expect((await ui.find({ type: 'Button', key: 'auto-place' }))?.props).toMatchObject({ label: 'Off' })
+  await ui.press({ key: 'auto-place' })
+  expect(runs.filter(a => a[2]).at(-1)).toEqual(['/opt/ca/app/acct', 'auto', 'on'])
+  expect((await ui.find({ type: 'Button', key: 'auto-place' }))?.props).toMatchObject({ label: 'On' })
+  failNext = true
+  await ui.press({ key: 'auto-place' })
+  expect((await ui.find({ type: 'Button', key: 'auto-place' }))?.props).toMatchObject({ label: 'On' })
   await ui.unmount()
 })

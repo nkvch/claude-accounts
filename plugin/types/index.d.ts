@@ -21,6 +21,7 @@ declare module 'claude-code' {
       labels: Record<string, string>
       notes: Record<string, string>
       plans: Record<string, string>
+      autoPlace: string
     }
   }
 }

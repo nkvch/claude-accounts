@@ -42,6 +42,9 @@ const notes = atom({ plugin: 'subscriptions', key: 'notes' } as const, {})
 // Each account's plan name (accounts.json `plan`, e.g. "Pro", "Ultra").
 const plans = atom({ plugin: 'subscriptions', key: 'plans' } as const, {})
 
+// `acct auto`: 'on' or 'off' (whether new chats are placed on a subscription automatically), '' until read.
+const autoPlace = atom({ plugin: 'subscriptions', key: 'autoPlace' } as const, '')
+
 const hm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 // 16:00 · Wed 03:00
 const when = (ms: number) => {
@@ -73,6 +76,16 @@ let demo = false
 
 async function readDemo($: EngineInterface): Promise<Demo | null> {
   try { return JSON.parse(await $.fs.read(`${where.home}/demo.json`)) as Demo } catch { return null }
+}
+
+async function readAuto($: EngineInterface) {
+  try {
+    const { exitCode, stdout, stderr } = await $.process.run([ACCT(), 'auto'], { timeoutMs: 15000 })
+    if (exitCode === 0) await update($, autoPlace, () => stdout.trim())
+    else $.ui.log(`subscriptions: acct auto failed: ${stderr.trim()}`, { to: 'debug' })
+  } catch (err) {
+    $.ui.log(`subscriptions: acct auto failed: ${String(err)}`, { to: 'debug' })
+  }
 }
 
 async function probe($: EngineInterface) {
@@ -119,6 +132,7 @@ export const register: Register = on => {
     await update($, mine, () => usage.rateLimits)
     void $.ui.open({ id: PANE, title: TITLE })
     void probe($)
+    void readAuto($)
     $.clock.every(PROBE_EVERY_MS, () => void probe($))
     $.clock.every(WATCH_EVERY_MS, () => void watchAccounts($))
     return started
@@ -165,6 +179,8 @@ export const register: Register = on => {
     // "Ultra · 10x", "Pro", "10x" or nothing: only what accounts.json says.
     const planOf = (k: string) => [planNames[k], scale[k] != null ? `${scale[k]}x` : ''].filter(Boolean).join(' · ')
 
+    const auto = await read($, autoPlace)
+
     const now = Date.now()
     const moveHere = (name: string) => async () => {
       try {
@@ -174,6 +190,16 @@ export const register: Register = on => {
         $.ui.toast(moved ? `Switching this chat to ${nameOf(name)}: it restarts on it as soon as it is idle.` : (stderr || stdout).trim())
       } catch (err) {
         $.ui.toast(`Could not switch to ${nameOf(name)}: ${String(err)}`)
+      }
+    }
+    const flipAuto = async () => {
+      const next = auto === 'on' ? 'off' : 'on'
+      try {
+        const { exitCode, stdout, stderr } = await $.process.run([ACCT(), 'auto', next], { timeoutMs: 15000 })
+        if (exitCode === 0) await update($, autoPlace, () => stdout.trim())
+        else $.ui.toast((stderr || stdout).trim())
+      } catch (err) {
+        $.ui.toast(`Could not change auto-placement: ${String(err)}`)
       }
     }
     // Dialogs take it from here (name, plan, sign-in); detached so the pane is not held while they wait.
@@ -277,6 +303,12 @@ export const register: Register = on => {
         )}
 
         {rest.length === 0 && acct === 'default' && <Text size="footnote" dimColor>Checking…</Text>}
+        {auto && (
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
+            <Text size="footnote" dimColor>Auto-place new chats</Text>
+            <Button key="auto-place" label={auto === 'on' ? 'On' : 'Off'} variant="secondary" onPress={flipAuto} />
+          </Box>
+        )}
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
           <Text size="footnote" dimColor>{checked > 0 ? `Checked at ${when(checked)}` : ''}</Text>
           <Button key="add-subscription" label="Add subscription" variant="secondary" onPress={addSubscription} />

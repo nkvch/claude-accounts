@@ -122,8 +122,12 @@ exports.acct = (state, sessionId, cwd, env) => {
   // Where the code and the config are, for the session's own tools (`acct`, the Subscriptions pane).
   env.CLAUDE_ACCOUNTS_APP = DIR;
   env.CLAUDE_ACCOUNTS_HOME = HOME;
-  if (env.CLAUDE_CODE_OAUTH_TOKEN && !env.CC_ACCOUNT) state.desktopToken = env.CLAUDE_CODE_OAUTH_TOKEN;
+  // The env is built afresh for every spawn, so a CC_ACCOUNT already in it came from the app's own
+  // environment (Claude started from a shell of a Code session), not from this session's pick.
+  delete env.CC_ACCOUNT;
   const cfg = config();
+  const ours = Object.values(cfg.accounts || {}).map((a) => a?.tokenKey && envValue(a.tokenKey)).filter(Boolean);
+  if (env.CLAUDE_CODE_OAUTH_TOKEN && !ours.includes(env.CLAUDE_CODE_OAUTH_TOKEN)) state.desktopToken = env.CLAUDE_CODE_OAUTH_TOKEN;
   let { name, why } = pick(state, cfg, sessionId, cwd);
   (state.wanted ??= new Map()).set(sessionId, name);
   // A subscription whose last check failed (e.g. its org turned Claude Code off) would only

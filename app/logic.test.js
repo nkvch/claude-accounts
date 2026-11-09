@@ -352,3 +352,22 @@ test("acct auto off, read by logic.js from the same file: no placement; on: plac
   assert.strictEqual(run("s-int-on", state).CC_ACCOUNT, "cr");
   assert.strictEqual(overrides()["s-int-on"], "cr");
 });
+
+test("a CC_ACCOUNT inherited from the app's environment is dropped when the session runs on the desktop login", () => {
+  config({ autoPlace: false });
+  write("state/limits.json", {});
+  const state = { chosen: new Map() };
+  const env = { ...desktopEnv(), CC_ACCOUNT: "cr" };
+  logic.acct(state, "s-leak", "/tmp/proj", env);
+  assert.strictEqual(env.CC_ACCOUNT, undefined);
+  assert.strictEqual(env.CLAUDE_CODE_OAUTH_TOKEN, "desktop-token");
+  assert.strictEqual(state.desktopToken, "desktop-token");
+});
+
+test("a subscription's own token is never taken for the desktop login's", () => {
+  config({ autoPlace: false });
+  write("state/limits.json", {});
+  const state = { chosen: new Map() };
+  logic.acct(state, "s-own", "/tmp/proj", { CLAUDE_CODE_OAUTH_TOKEN: "fake-cr" });
+  assert.strictEqual(state.desktopToken, undefined);
+});

@@ -55,7 +55,7 @@ Set the plan of the account Claude Desktop is signed in to in `~/.claude-account
 ## In a session
 
 - `/acct` shows the chat's subscription; `/acct <name>` moves it (same as the pane's button).
-- `acct auto` shows whether new chats are placed automatically (`on`/`off`); `acct auto on|off` sets `autoPlace` in `accounts.json`, the next new chat follows it. `auto` is reserved for this: a subscription named `auto` cannot be moved to with `acct auto`.
+- `acct scale` shows `adaptive`/`independent`; `acct scale adaptive|independent` sets `barScale` in `accounts.json` (also the "Bar width" button in the pane). `acct auto` shows whether new chats are placed automatically (`on`/`off`); `acct auto on|off` sets `autoPlace` in `accounts.json`, the next new chat follows it. `auto` is reserved for this: a subscription named `auto` cannot be moved to with `acct auto`.
 - The Subscriptions pane has an Auto-place switch for the same flag.
 - `/limits` reopens the pane.
 

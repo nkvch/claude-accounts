@@ -63,6 +63,59 @@ print("on" if want else "off")
 PYAUTO
   exit $?
 fi
+# acct scale      -> adaptive|independent: how wide the pane draws each bar (`barScale` in accounts.json)
+if [ "${1:-}" = "scale" ]; then
+  /usr/bin/python3 - "$HOME_DIR" "${2:-}" <<'PYSCALE'
+import json, os, re, sys, tempfile
+home, arg = sys.argv[1:]
+if arg not in ("", "adaptive", "independent"):
+    sys.exit("usage: acct scale [adaptive|independent]")
+p = os.path.join(home, "accounts.json")
+try:
+    with open(p, encoding="utf-8", newline="") as f:
+        text = f.read()
+    cfg = json.loads(text)
+except (OSError, UnicodeError, ValueError) as e:
+    sys.exit(f"cannot read {p}: {e}")
+if not isinstance(cfg, dict):
+    sys.exit(f"{p}: top level is not an object")
+current = cfg.get("barScale", "adaptive")
+if current not in ("adaptive", "independent"):
+    sys.exit(f"{p}: barScale must be adaptive or independent, got {current!r}")
+if not arg:
+    print(current); sys.exit(0)
+if "barScale" in cfg:
+    new = re.sub(r'("barScale"\s*:\s*)"[^"]*"', lambda m: m.group(1) + json.dumps(arg), text, count=1)
+else:
+    m = re.match(r'(\s*\{)(\s*)', text)
+    gap = m.group(2)
+    if "\n" in gap:
+        new = text[:m.end(1)] + f'{gap}"barScale": "{arg}",' + text[m.end(1):]
+    else:
+        new = text[:m.end(1)] + f' "barScale": "{arg}", ' + text[m.end(0):]
+try:
+    check = json.loads(new)
+except ValueError:
+    check = None
+if check != {**cfg, "barScale": arg}:
+    sys.exit(f"{p}: could not set barScale without changing other content; edit it by hand")
+target = os.path.realpath(p)
+try:
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".accounts.json.")
+except OSError as e:
+    sys.exit(f"cannot write {p}: {e}")
+try:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+        f.write(new)
+    os.chmod(tmp, os.stat(target).st_mode & 0o7777)
+    os.replace(tmp, target)
+except (OSError, UnicodeError) as e:
+    if os.path.exists(tmp): os.unlink(tmp)
+    sys.exit(f"cannot write {p}: {e}")
+print(arg)
+PYSCALE
+  exit $?
+fi
 [ -n "$SID" ] || { echo "not inside a Claude Desktop Code session"; exit 1; }
 if [ -z "${1:-}" ]; then
   echo "now: ${CC_ACCOUNT:-default}"; exit 0

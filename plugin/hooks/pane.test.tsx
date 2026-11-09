@@ -412,3 +412,38 @@ for (const [mode, expected] of [['independent', '100%'], ['adaptive', '50%'], ['
     await ui.unmount()
   })
 }
+
+test('the Bar width button flips between plan size and full width through acct scale, and shows a failure', async ($, on) => {
+  const accounts = { accounts: { default: { proX: 10, label: 'Big' }, side: { proX: 5, label: 'Side' } } }
+  const probes = { side: { label: 'Side', five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 } }
+  let fail = false
+  const { ui, runs, toasts } = await boot($, on, {
+    accounts, probes,
+    acct: async argv => (fail ? { exitCode: 1, stdout: '', stderr: 'cannot write accounts.json' } : OK(argv[2] ?? '')),
+  })
+  const width = async () => (await ui.find({ type: 'Box', key: 'track-side-7' }))?.props.width
+  const button = async () => (await ui.find({ type: 'Button', key: 'bar-scale' }))?.props
+  expect(await ui.find({ type: 'Text', text: /Bar width/ })).toBeTruthy()
+  expect(await button()).toMatchObject({ label: 'Plan size' })
+  expect(await width()).toBe('50%')
+  await ui.press({ key: 'bar-scale' })
+  expect(runs.filter(a => a[1] === 'scale')).toEqual([['/opt/ca/app/acct', 'scale', 'independent']])
+  expect(await button()).toMatchObject({ label: 'Full' })
+  expect(await width()).toBe('100%')
+  await ui.press({ key: 'bar-scale' })
+  expect(runs.filter(a => a[1] === 'scale').pop()).toEqual(['/opt/ca/app/acct', 'scale', 'adaptive'])
+  expect(await width()).toBe('50%')
+  fail = true
+  await ui.press({ key: 'bar-scale' })
+  expect(toasts).toEqual(['cannot write accounts.json'])
+  expect(await button()).toMatchObject({ label: 'Plan size' })
+  expect(await width()).toBe('50%')
+  await ui.unmount()
+})
+
+test('the dropdown stands alone, without a "Switch to" label', async ($, on) => {
+  const { ui } = await boot($, on, {})
+  expect(await ui.find({ type: 'Select', key: 'account' })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /^Switch to$/ })).toBeFalsy()
+  await ui.unmount()
+})

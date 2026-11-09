@@ -241,6 +241,16 @@ export const register: Register = on => {
         $.ui.toast(`Could not change auto-placement: ${String(err)}`)
       }
     }
+    const flipScale = async () => {
+      const next = independent ? 'adaptive' : 'independent'
+      try {
+        const { exitCode, stdout, stderr } = await $.process.run([ACCT(), 'scale', next], { timeoutMs: 15000 })
+        if (exitCode !== 0) $.ui.toast((stderr || stdout).trim() || `acct scale ${next} exited with code ${exitCode}`)
+        else await update($, barScale, () => (stdout.trim() === 'independent' ? 'independent' : 'adaptive'))
+      } catch (err) {
+        $.ui.toast(`Could not change the bar width: ${String(err)}`)
+      }
+    }
     // Dialogs take it from here (name, plan, sign-in); detached so the pane is not held while they wait.
     const addSubscription = async () => {
       await $.process.run(['/bin/sh', '-c', `nohup /usr/bin/python3 '${ADD_PY()}' >/dev/null 2>&1 &`], { timeoutMs: 5000 })
@@ -315,17 +325,12 @@ export const register: Register = on => {
           </Text>
           {shown !== acct && <Text size="footnote" color="warning">{`Switching to ${nameOf(shown)} when this chat is idle`}</Text>}
           {Select && choices.length > 0 && (
-            <Box flexDirection="row" alignItems="center" gap="sm">
-              <Text size="footnote" dimColor>Switch to</Text>
-              <Box flexGrow={1}>
-                <Select
-                  key="account"
-                  value={shown}
-                  options={choices.map(k => ({ value: k, label: nameOf(k) }))}
-                  onSelect={value => { if (value !== shown) void moveHere(value)() }}
-                />
-              </Box>
-            </Box>
+            <Select
+              key="account"
+              value={shown}
+              options={choices.map(k => ({ value: k, label: nameOf(k) }))}
+              onSelect={value => { if (value !== shown) void moveHere(value)() }}
+            />
           )}
         </Box>
 
@@ -354,6 +359,10 @@ export const register: Register = on => {
             <Button key="auto-place" label={auto === 'on' ? 'On' : auto === 'off' ? 'Off' : 'unknown'} variant="secondary" onPress={flipAuto} />
           </Box>
         )}
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
+          <Text size="footnote" dimColor>Bar width</Text>
+          <Button key="bar-scale" label={independent ? 'Full' : 'Plan size'} variant="secondary" onPress={flipScale} />
+        </Box>
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap="sm">
           <Text size="footnote" dimColor>{checked > 0 ? `Checked at ${when(checked)}` : ''}</Text>
           <Button key="add-subscription" label="Add subscription" variant="secondary" onPress={addSubscription} />

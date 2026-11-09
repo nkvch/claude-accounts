@@ -19,7 +19,9 @@ pane next to the chat:
 
 New chats pick a subscription by themselves: the one with the most weekly limit that would
 otherwise go unused before its reset, weighted by plan size. Sub-sessions stay on their parent's.
-Folder rules can pin a project to a subscription.
+Folder rules can pin a project to a subscription. Set `"autoPlace": false` (or run `acct auto off`)
+to turn the automatic placement off: a new chat then stays on the desktop login until moved by hand,
+and a subscription that fails its check falls back to the desktop login.
 
 ## Install
 
@@ -42,7 +44,7 @@ Set the plan of the account Claude Desktop is signed in to in `~/.claude-account
 
 | File | What |
 | --- | --- |
-| `accounts.json` | subscriptions (see `accounts.example.json`): `label`, `tokenKey`, `plan`, `proX`, optional `note`, `auto: false` to never pick it for new chats, `env`; `rules` pin folders to an account; optional `envFile` to keep tokens in another dotenv file |
+| `accounts.json` | subscriptions (see `accounts.example.json`): `label`, `tokenKey`, `plan`, `proX`, optional `note`, `auto: false` to never pick it for new chats, `env`; top-level `autoPlace` (default `true`; `false` = no automatic placement of new chats, no fallback to another subscription), top-level `barScale` (`"adaptive"` default: each bar drawn to its plan size; `"independent"`: every bar full width, filled only relative to itself), `rules` pin folders to an account; optional `envFile` to keep tokens in another dotenv file |
 | `tokens.env` | the long-lived tokens (`CC_TOKEN_<NAME>=…`, from `claude setup-token`), mode 600 |
 | `state/` | `hook.log` (which session got which account), `launch.log`, `limits.json`, `overrides.json` |
 | `inject.js` | optional: your own script run in every page of the app |
@@ -53,6 +55,8 @@ Set the plan of the account Claude Desktop is signed in to in `~/.claude-account
 ## In a session
 
 - `/acct` shows the chat's subscription; `/acct <name>` moves it (same as the pane's button).
+- `acct scale` shows `adaptive`/`independent`; `acct scale adaptive|independent` sets `barScale` in `accounts.json` (also the "Bar width" button in the pane). `acct auto` shows whether new chats are placed automatically (`on`/`off`); `acct auto on|off` sets `autoPlace` in `accounts.json`, the next new chat follows it. `auto` is reserved for this: a subscription named `auto` cannot be moved to with `acct auto`.
+- The Subscriptions pane has an Auto-place switch for the same flag.
 - `/limits` reopens the pane.
 
 ## How it works

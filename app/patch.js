@@ -80,6 +80,11 @@ asar.createPackageWithOptions(dir, out, { unpack: `{${patterns.join(",")}}` }).t
   if (unpackedAfter.join("\n") !== unpackedBefore.join("\n")) {
     throw new Error(`unpacked set differs:\nbefore ${unpackedBefore.join(" ")}\nafter ${unpackedAfter.join(" ")}`);
   }
+  // asar writes the unpacked files without their modes; node-pty's spawn-helper must stay executable
+  // or every terminal in the app dies with "posix_spawn failed: Permission denied".
+  for (const p of unpackedBefore) {
+    fs.chmodSync(path.join(out + ".unpacked", p), fs.statSync(path.join(archive + ".unpacked", p)).mode & 0o777);
+  }
   fs.rmSync(archive + ".unpacked", { recursive: true });
   fs.renameSync(out + ".unpacked", archive + ".unpacked");
   fs.copyFileSync(out, archive);

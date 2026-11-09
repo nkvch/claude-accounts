@@ -1,4 +1,5 @@
 {
+  "autoPlace": true,
   "accounts": {
     "default": { "label": "Desktop login", "plan": "Max 5x", "proX": 5 },
     "personal": {

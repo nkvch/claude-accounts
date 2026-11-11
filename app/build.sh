@@ -25,7 +25,7 @@ if ! "$NODE" "$HERE/patch.js" "$TMP"; then
 fi
 # Electron 44 (Claude 4.4212) refuses a repacked app.asar even with a matching plist hash
 # ("Failed to get integrity for validatable asar archive"); the copy is ad-hoc signed anyway.
-"$HERE/node_modules/.bin/electron-fuses" write --app "$TMP" EnableEmbeddedAsarIntegrityValidation=off >/dev/null
+"$NODE" "$HERE/node_modules/@electron/fuses/dist/bin.js" write --app "$TMP" EnableEmbeddedAsarIntegrityValidation=off >/dev/null
 codesign --force --deep --sign - "$TMP" 2>/dev/null
 rm -rf "$DST"; mv "$TMP" "$DST"
 echo "$sig" > "$STAMP"

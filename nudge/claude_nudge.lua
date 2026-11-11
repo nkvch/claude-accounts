@@ -10,16 +10,21 @@ claudeNudges = claudeNudges or {}
 -- The patched app (install.sh builds it); a bare `open` of a claude:// link would start the official one.
 local CLAUDE_APP = os.getenv("HOME") .. "/Applications/Claude Accounts.app"
 
+claudeNudgeTasks = claudeNudgeTasks or {}
+
 local function openChat(session)
-    hs.task.new("/usr/bin/open", function(code, _, stderr)
+    local task
+    task = hs.task.new("/usr/bin/open", function(code, _, stderr)
+        claudeNudgeTasks[task] = nil
         if code ~= 0 then hs.alert.show("Не открылось: " .. (stderr or ""):sub(1, 160), 6) end
-    end, { "-a", CLAUDE_APP, "claude://claude.ai/epitaxy/" .. session }):start()
+    end, { "-a", CLAUDE_APP, "claude://claude.ai/epitaxy/" .. session })
+    claudeNudgeTasks[task] = true
+    task:start()
 end
 
 -- Run a card's click command. Hammerspoon handled the click, so it may bring
 -- Chrome forward even where macOS stops Chrome from activating itself; a failed
 -- command says so instead of the card just vanishing.
-claudeNudgeTasks = claudeNudgeTasks or {}
 -- key -> the app you were in when you clicked (and when); a later
 -- claudeNudgeDismissKey(key, true) — the step is done and its window went back
 -- to the Dock from under you — hands focus back to it.

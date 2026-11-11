@@ -17,5 +17,6 @@ SESSION="${CLAUDE_CODE_HOST_SESSION_ID:-}"
 # Lua string literal: escape backslash and quote, turn newlines/CR/tabs into escapes.
 esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS=""} NR>1{print "\\n"} {gsub(/\r/,"\\r"); gsub(/\t/,"\\t"); print}'; }
 
-HS=$(command -v hs || echo /opt/homebrew/bin/hs)
+# The `hs` command ships inside the app; hs.ipc.cliInstall() only adds it to PATH.
+HS=$(command -v hs || ls {,"$HOME"}/Applications/Hammerspoon.app/Contents/Frameworks/hs/hs 2>/dev/null | head -1 || true)
 "$HS" -c "claudeNudge(\"$(esc "$TITLE")\", \"$(esc "$BODY")\", \"$SESSION\")" </dev/null >/dev/null

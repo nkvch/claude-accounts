@@ -59,6 +59,34 @@ Set the plan of the account Claude Desktop is signed in to in `~/.claude-account
 - The Subscriptions pane has an Auto-place switch for the same flag.
 - `/limits` reopens the pane.
 
+## Chat banner
+
+A chat can call you with a card in the top-right corner of the screen. It stays until you click
+it, and the click opens the chat that raised it in Claude Accounts.app, so you land right where you
+are needed. It needs [Hammerspoon](https://www.hammerspoon.org) (`brew install --cask hammerspoon`);
+`install.sh` loads `nudge/claude_nudge.lua` into it and links the command to
+`~/.claude-accounts/bin/claude-nudge` (`$CLAUDE_ACCOUNTS_HOME/bin/` if you moved the folder). It
+also turns on Hammerspoon's `hs.ipc`, the port the command talks through: any program running as
+you can then run Lua in Hammerspoon.
+
+```bash
+~/.claude-accounts/bin/claude-nudge "Deploy is stuck" "Need SSH access to the server"
+```
+
+The card knows its chat from `$CLAUDE_CODE_HOST_SESSION_ID`, which the desktop app sets in every
+Code session, sub-sessions and scheduled tasks included. Run outside the app, the card still shows
+and a click only dismisses it.
+
+To have every chat call you this way, add to `~/.claude/CLAUDE.md`:
+
+```markdown
+## Calling me
+When you are blocked on me, finished a long task, or need my eyes, raise a banner
+(it stays until I click it; the click opens this chat):
+`~/.claude-accounts/bin/claude-nudge "Short title" "What exactly I need to do"`
+One line each; the detail stays in the chat.
+```
+
 ## How it works
 
 `app/patch.js` edits a copy of Claude Desktop's `app.asar` in four places, each matched exactly
@@ -77,5 +105,9 @@ sessions.
 rm -rf ~/Applications/"Claude Accounts.app" ~/Applications/"Claude Launcher.app"
 claude plugin uninstall subscriptions@claude-accounts
 ```
+
+To drop the chat banner, remove the `-- Claude chat banner (claude-accounts)` comment and the
+`claude_nudge.lua` line under it from `~/.hammerspoon/init.lua`
+(and `require("hs.ipc")` if nothing else of yours uses it).
 
 `~/.claude-accounts` holds your tokens: delete it too if you do not want to keep them.

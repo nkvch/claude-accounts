@@ -1,0 +1,188 @@
+-- Claude nudge banner: a persistent top-right card a chat raises to call you.
+-- Loaded from ~/.hammerspoon/init.lua via dofile() (install.sh adds the line);
+-- raised by nudge/claude-nudge. A click runs the card's
+-- action (a shell command string, or an argv table run without a shell — the
+-- user-browser notify hook passes one) or opens the chat that raised it, then
+-- dismisses it. The ✕ only dismisses.
+
+claudeNudges = claudeNudges or {}
+
+-- The patched app (install.sh builds it); a bare `open` of a claude:// link would start the official one.
+local CLAUDE_APP = os.getenv("HOME") .. "/Applications/Claude Accounts.app"
+
+local function openChat(session)
+    hs.task.new("/usr/bin/open", function(code, _, stderr)
+        if code ~= 0 then hs.alert.show("Не открылось: " .. (stderr or ""):sub(1, 160), 6) end
+    end, { "-a", CLAUDE_APP, "claude://claude.ai/epitaxy/" .. session }):start()
+end
+
+-- Run a card's click command. Hammerspoon handled the click, so it may bring
+-- Chrome forward even where macOS stops Chrome from activating itself; a failed
+-- command says so instead of the card just vanishing.
+claudeNudgeTasks = claudeNudgeTasks or {}
+-- key -> the app you were in when you clicked (and when); a later
+-- claudeNudgeDismissKey(key, true) — the step is done and its window went back
+-- to the Dock from under you — hands focus back to it.
+claudeNudgeReturnTo = claudeNudgeReturnTo or {}
+local RETURN_TTL_S = 15 * 60
+
+local function runAction(action, key)
+    if key then claudeNudgeReturnTo[key] = { app = hs.application.frontmostApplication(), at = os.time() } end
+    -- A table is an argv list (program first) and runs without a shell; a string is a shell command.
+    local program, args = "/bin/sh", { "-c", action }
+    if type(action) == "table" then program, args = action[1], { table.unpack(action, 2) } end
+    local task
+    task = hs.task.new(program, function(code, _, stderr)
+        claudeNudgeTasks[task] = nil
+        if code == 0 then
+            local chrome = hs.application.get("Google Chrome")
+            if chrome then chrome:activate() end
+        else
+            hs.alert.show("Не открылось: " .. (stderr or ""):sub(1, 160), 6)
+        end
+    end, args)
+    claudeNudgeTasks[task] = true
+    task:start()
+end
+
+local function relayout()
+    local top = hs.screen.mainScreen():frame().y + 40
+    for _, n in ipairs(claudeNudges) do
+        local f = n.canvas:frame()
+        n.canvas:frame({ x = f.x, y = top, w = f.w, h = f.h })
+        top = top + f.h + 10
+    end
+end
+
+function claudeNudgeDismiss(canvas)
+    for i, n in ipairs(claudeNudges) do
+        if n.canvas == canvas then
+            table.remove(claudeNudges, i)
+            break
+        end
+    end
+    canvas:delete(0.15)
+    relayout()
+end
+
+local function removeKeyed(key)
+    for i = #claudeNudges, 1, -1 do
+        if claudeNudges[i].key == key then claudeNudgeDismiss(claudeNudges[i].canvas) end
+    end
+end
+
+-- The caller's step is done: dismiss its cards. With returnFocus, also go
+-- back to the app the click came from — only while Chrome is still in front,
+-- so if you have moved on yourself you are left alone.
+function claudeNudgeDismissKey(key, returnFocus)
+    removeKeyed(key)
+    local back = claudeNudgeReturnTo[key]
+    claudeNudgeReturnTo[key] = nil
+    if not (returnFocus and back and os.time() - back.at < RETURN_TTL_S) then return true end
+    local front = hs.application.frontmostApplication()
+    if front and front:name() == "Google Chrome" and back.app:isRunning() and back.app:name() ~= "Google Chrome" then
+        back.app:activate()
+    end
+    return true
+end
+
+function claudeNudge(title, body, session, action, key)
+    if session == "" then session = nil end
+    if action == "" or (type(action) == "table" and #action == 0) then action = nil end
+    if key == "" then key = nil end
+    if key then  -- a re-ask replaces the card; focus untouched, old return target dropped
+        removeKeyed(key)
+        claudeNudgeReturnTo[key] = nil
+    end
+    local screen = hs.screen.mainScreen():frame()
+    local w = 380
+    local pad = 16
+    local titleH = 24
+    local lines = 0  -- ~42 characters per line; count characters, not UTF-8 bytes
+    for seg in (body .. "\n"):gmatch("([^\n]*)\n") do
+        lines = lines + math.max(1, math.ceil((utf8.len(seg) or #seg) / 42))
+    end
+    local bodyH = math.max(20, lines * 19)
+    local h = titleH + bodyH + pad * 2 + 14
+    local x = screen.x + screen.w - w - 20
+    local c = hs.canvas.new({ x = x, y = screen.y + 40, w = w, h = h })
+    c:level(hs.canvas.windowLevels.overlay)
+    c:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+
+    c[1] = { type = "rectangle", action = "fill",
+             fillColor = { red = 0.08, green = 0.09, blue = 0.12, alpha = 0.97 },
+             roundedRectRadii = { xRadius = 12, yRadius = 12 } }
+    c[2] = { type = "rectangle", action = "stroke", strokeWidth = 2,
+             strokeColor = { red = 0.98, green = 0.62, blue = 0.20, alpha = 1.0 },
+             roundedRectRadii = { xRadius = 12, yRadius = 12 } }
+    c[3] = { type = "text", text = title,
+             textColor = { red = 0.98, green = 0.72, blue = 0.30, alpha = 1 },
+             textSize = 15, textFont = "Menlo-Bold",
+             frame = { x = pad, y = pad - 4, w = w - pad * 2 - 24, h = titleH } }
+    c[4] = { type = "text", text = body,
+             textColor = { white = 0.92, alpha = 1 },
+             textSize = 13, textFont = "Menlo",
+             frame = { x = pad, y = pad + titleH - 6, w = w - pad * 2, h = bodyH + 8 } }
+    c[5] = { type = "text",
+             text = action and "нажми — откроется окно" or session and "нажми — откроется чат" or "нажми, чтобы закрыть",
+             textColor = { white = 0.45, alpha = 1 },
+             textSize = 10, textFont = "Menlo",
+             frame = { x = pad, y = h - pad - 4, w = w - pad * 2, h = 14 } }
+
+    c[6] = { type = "text", text = "✕", id = "close", trackMouseUp = true,
+             textColor = { white = 0.6, alpha = 1 }, textSize = 15,
+             frame = { x = w - 30, y = 8, w = 22, h = 22 } }
+
+    c:clickActivating(false)
+    c:mouseCallback(function(canvas, event, id)
+        if event == "mouseUp" then
+            if id ~= "close" then
+                if action then
+                    runAction(action, key)
+                elseif session then
+                    openChat(session)
+                end
+            end
+            claudeNudgeDismiss(canvas)
+        end
+    end)
+    c:canvasMouseEvents(true, true)
+    c:show(0.2)
+
+    table.insert(claudeNudges, { canvas = c, key = key })
+    relayout()
+    return true
+end
+
+-- Entry points for a user-browser notify hook. The hook writes every value it
+-- received (all untrusted) as raw bytes into files of a private temp dir and passes
+-- only that dir's path, so no received text is ever part of Lua code.
+local function readNudgeDir(dir)
+    if type(dir) ~= "string" or not dir:match("^[%w/._-]+$") or not dir:find("/ub%-notify%.") then return nil end
+    local files = {}
+    for _, name in ipairs({ "key", "title", "body", "argv", "session", "return" }) do
+        local f = io.open(dir .. "/" .. name, "rb")
+        if f then
+            files[name] = f:read("a")
+            f:close()
+            os.remove(dir .. "/" .. name)
+        end
+    end
+    os.remove(dir)
+    return files
+end
+
+function claudeNudgeFromDir(dir)
+    local v = readNudgeDir(dir)
+    if not v then return false end
+    local argv = {}
+    for part in (v.argv or ""):gmatch("([^\0]*)\0") do table.insert(argv, part) end
+    if #argv == 0 then argv = nil end
+    return claudeNudge(v.title or "", v.body or "", v.session or "", argv or "", v.key or "")
+end
+
+function claudeNudgeDismissFromDir(dir)
+    local v = readNudgeDir(dir)
+    if not v or not v.key or v.key == "" then return false end
+    return claudeNudgeDismissKey(v.key, v["return"] == "true")
+end

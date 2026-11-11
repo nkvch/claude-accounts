@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Raise a banner in the top-right corner of the screen that stays until clicked.
+#
+#   claude-nudge "Title" "What exactly needs doing"
+#
+# Run from a Claude Code session in the desktop app, the banner remembers that
+# session ($CLAUDE_CODE_HOST_SESSION_ID): a click opens that chat in
+# Claude Accounts.app. Needs Hammerspoon with nudge/claude_nudge.lua loaded
+# (install.sh does it).
+set -euo pipefail
+
+TITLE="${1:?usage: claude-nudge TITLE BODY}"
+BODY="${2:-}"
+SESSION="${CLAUDE_CODE_HOST_SESSION_ID:-}"
+[[ "$SESSION" =~ ^local_[0-9a-f-]+$ ]] || SESSION=""
+
+# Lua string literal: escape backslash and quote, turn newlines/CR/tabs into escapes.
+esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS=""} NR>1{print "\\n"} {gsub(/\r/,"\\r"); gsub(/\t/,"\\t"); print}'; }
+
+HS=$(command -v hs || echo /opt/homebrew/bin/hs)
+"$HS" -c "claudeNudge(\"$(esc "$TITLE")\", \"$(esc "$BODY")\", \"$SESSION\")" </dev/null >/dev/null

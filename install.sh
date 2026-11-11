@@ -55,6 +55,26 @@ else
   echo "Claude Code not found: open Claude once, then run this again (or: claude plugin marketplace add $REPO)"
 fi
 
+say_step "Chat banner (Hammerspoon)"
+mkdir -p "$CONF/bin"
+ln -sf "$REPO/nudge/claude-nudge" "$CONF/bin/claude-nudge"
+if [ -d /Applications/Hammerspoon.app ] || [ -d "$HOME/Applications/Hammerspoon.app" ]; then
+  HS_INIT="$HOME/.hammerspoon/init.lua"
+  mkdir -p "$(dirname "$HS_INIT")"
+  touch "$HS_INIT"
+  grep -qE '^[[:space:]]*require\("hs\.ipc"\)' "$HS_INIT" || printf '\nrequire("hs.ipc")\n' >> "$HS_INIT"
+  grep -qF "$REPO/nudge/claude_nudge.lua" "$HS_INIT" ||
+    printf '\n-- Claude chat banner (claude-accounts)\nlocal ok, err = pcall(dofile, "%s"); if not ok then print("claude-accounts banner: " .. tostring(err)) end\n' "$REPO/nudge/claude_nudge.lua" >> "$HS_INIT"
+  HS=$(command -v hs || ls {,"$HOME"}/Applications/Hammerspoon.app/Contents/Frameworks/hs/hs 2>/dev/null | head -1 || true)
+  if pgrep -xq Hammerspoon && [ -n "$HS" ] && "$HS" -c "dofile(\"$REPO/nudge/claude_nudge.lua\")" </dev/null >/dev/null 2>&1; then
+    echo "loaded into Hammerspoon; chats call you with $CONF/bin/claude-nudge"
+  else
+    echo "in $HS_INIT: start Hammerspoon (or reload its config) to turn the banner on"
+  fi
+else
+  echo "Hammerspoon not found, banner skipped: brew install --cask hammerspoon, then run this again"
+fi
+
 cat <<EOF
 
 Done. Next:
@@ -63,4 +83,5 @@ Done. Next:
   2. In a Code session, the Subscriptions pane shows your limits. "Add subscription" signs in
      another Claude account; "Move chat here" moves a chat onto it.
   3. Set the plan of your desktop login in $CONF/accounts.json ("plan", "proX" = times Pro usage).
+  4. To have chats call you with a banner, add the "Chat banner" lines from README.md to ~/.claude/CLAUDE.md.
 EOF

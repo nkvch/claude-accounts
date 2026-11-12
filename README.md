@@ -84,7 +84,7 @@ and a click only dismisses it.
 
 While your screen is shared or recorded (Meet, Zoom, Teams, QuickTime, Cmd+Shift+5, OBS, anything
 that captures it; `~/.claude-accounts/bin/claude-share-state` reports it, polled every 3 s), no card
-is drawn. Cards wait in a queue, and when the capture ends one summary card comes: "Пока ты шарил: N"
+is drawn, and cards already on screen when it begins are taken down. Cards wait in a queue, and when the capture ends one summary card comes: "Пока ты шарил: N"
 with a line per card, "title — first line of the body" (up to 6 lines, the rest as "… и ещё N").
 A click on a line does what a click on that card would and removes the line; the ✕ drops the whole
 summary. A lone waiting card comes back as itself. If the detector is missing or fails, cards show

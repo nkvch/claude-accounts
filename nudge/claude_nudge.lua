@@ -7,7 +7,8 @@
 --
 -- While the screen is shared or recorded (nudge/claude-share-state says so) or the
 -- quiet mode is on (ctrl+alt+cmd+Q), no card is drawn: it waits in a queue and,
--- when that ends, comes as one summary card (or as itself when it is alone).
+-- when that ends, comes as one summary card (or as itself when it is alone). Cards
+-- already on screen when it begins are taken down and queued the same way.
 -- The queue logic is in nudge_queue.lua, next to this file.
 
 claudeNudges = claudeNudges or {}
@@ -162,7 +163,8 @@ local function drawCard(title, body, session, action, key)
     c:canvasMouseEvents(true, true)
     c:show(0.2)
 
-    table.insert(claudeNudges, { canvas = c, key = key })
+    table.insert(claudeNudges, { canvas = c, key = key,
+        item = { title = title, body = body, session = session, action = action, key = key, at = os.time() } })
     relayout()
     return true
 end
@@ -288,11 +290,24 @@ local function shareStateBin()
     return home .. "/bin/claude-share-state"
 end
 
+-- The capture or the quiet mode just began: nothing may stay on screen. Every card and
+-- summary goes back to the queue with what it was raised with.
+local function hideShown()
+    local shown, items = {}, {}
+    for _, n in ipairs(claudeNudges) do
+        shown[#shown + 1] = n.canvas
+        for _, it in ipairs(n.summary or { n.item }) do items[#items + 1] = it end
+    end
+    for _, canvas in ipairs(shown) do claudeNudgeDismiss(canvas) end
+    Q.holdShown(claudeNudgeQueue, items)
+end
+
 local function applyCapture(state, why)
     if state == "unknown" and claudeNudgeQueue.capture ~= "unknown" then
         print("claude-nudge: screen-share state unknown, cards show as usual" .. (why and why ~= "" and (": " .. why) or ""))
     end
-    local items = Q.update(claudeNudgeQueue, { capture = state })
+    local items, began = Q.update(claudeNudgeQueue, { capture = state })
+    if began then hideShown() end
     if items then flush(items) end
 end
 
@@ -328,7 +343,8 @@ poll()
 -- The manual quiet mode behaves like a share until it is switched off.
 function claudeNudgeSetQuiet(on)
     hs.alert.show(on and "Тихо" or "Снова зову")
-    local items = Q.update(claudeNudgeQueue, { quiet = on })
+    local items, began = Q.update(claudeNudgeQueue, { quiet = on })
+    if began then hideShown() end
     if items then flush(items) end
 end
 

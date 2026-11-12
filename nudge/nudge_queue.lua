@@ -53,17 +53,25 @@ end
 
 -- Apply a change ({ quiet = bool } and/or { capture = "sharing"|"idle"|"unknown" }).
 -- Returns the held-back items when this change ends the suppression and the queue
--- is not empty (the queue is then emptied), else nil.
+-- is not empty (the queue is then emptied), else nil; and true as the second value
+-- when this change starts the suppression (cards on screen must then be hidden).
 function Q.update(s, change)
     local was = Q.suppressed(s)
     if change.quiet ~= nil then s.quiet = change.quiet end
     if change.capture ~= nil then s.capture = change.capture end
-    if was and not Q.suppressed(s) and #s.queue > 0 then
+    local now = Q.suppressed(s)
+    if was and not now and #s.queue > 0 then
         local items = s.queue
         s.queue = {}
-        return items
+        return items, false
     end
-    return nil
+    return nil, now and not was
+end
+
+-- Cards that were on screen when the suppression began become the queue, in the
+-- order they stood on screen (a queue is empty when a suppression begins).
+function Q.holdShown(s, items)
+    for _, it in ipairs(items) do Q.add(s.queue, it) end
 end
 
 -- `queued` while held back, `open` is decided by the caller (it owns the canvases).

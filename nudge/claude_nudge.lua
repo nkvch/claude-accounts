@@ -14,7 +14,7 @@
 claudeNudges = claudeNudges or {}
 
 local Q = dofile((debug.getinfo(1, "S").source:match("^@(.*)/[^/]*$") or ".") .. "/nudge_queue.lua")
-claudeNudgeQueue = claudeNudgeQueue or Q.new()
+claudeNudgeQueue = Q.ensure(claudeNudgeQueue or Q.new())
 
 -- The patched app (install.sh builds it); a bare `open` of a claude:// link would start the official one.
 local CLAUDE_APP = os.getenv("HOME") .. "/Applications/Claude Accounts.app"
@@ -302,23 +302,31 @@ local function hideShown()
     Q.holdShown(claudeNudgeQueue, items)
 end
 
-local function applyCapture(state, why)
-    if state == "unknown" and claudeNudgeQueue.capture ~= "unknown" then
+-- isPoll: the answer comes from the timer's poll (only those count towards "the
+-- detector keeps failing"); otherwise from the check before a card.
+local function applyCapture(word, why, isPoll)
+    local state, warn = Q.observe(claudeNudgeQueue, word, isPoll)
+    if warn then
         print("claude-nudge: screen-share state unknown, cards show as usual" .. (why and why ~= "" and (": " .. why) or ""))
+        hs.alert.show("Не вижу, шаришь ли ты — карточки идут как обычно", 6)
     end
     local items, began = Q.update(claudeNudgeQueue, { capture = state })
     if began then hideShown() end
     if items then flush(items) end
 end
 
--- Asked right before a card is drawn, so a share that began within the last poll
--- interval still holds the card back. The detector answers in well under 100 ms.
+local FRESH_S = 3
+local lastPollAt
+
+-- Asked right before a card is drawn, so a share that began since the last poll
+-- still holds it back. A poll's answer younger than FRESH_S is used as it is.
 local function freshCheck()
     if claudeNudgeQueue.capture == "sharing" then return end  -- the poll ends it
+    if lastPollAt and hs.timer.secondsSinceEpoch() - lastPollAt < FRESH_S then return end
     local bin = shareStateBin()
-    if not hs.fs.attributes(bin) then return applyCapture("unknown", "no " .. bin) end
+    if not hs.fs.attributes(bin) then return applyCapture("unknown", "no " .. bin, false) end
     local out = hs.execute("'" .. (bin:gsub("'", "'\\''")) .. "'")
-    applyCapture(Q.parseState(out))
+    applyCapture(Q.parseState(out), nil, false)
 end
 
 local pollTask, pollStarted
@@ -328,10 +336,14 @@ local function poll()
         return
     end
     local bin = shareStateBin()
-    if not hs.fs.attributes(bin) then return applyCapture("unknown", "no " .. bin) end
+    if not hs.fs.attributes(bin) then
+        lastPollAt = hs.timer.secondsSinceEpoch()
+        return applyCapture("unknown", "no " .. bin, true)
+    end
     pollStarted = os.time()
     pollTask = hs.task.new(bin, function(_, stdout, stderr)
-        applyCapture(Q.parseState(stdout), (stderr or ""):sub(1, 160))
+        lastPollAt = hs.timer.secondsSinceEpoch()
+        applyCapture(Q.parseState(stdout), (stderr or ""):sub(1, 160), true)
     end)
     pollTask:start()
 end
@@ -353,8 +365,8 @@ claudeNudgeHotkey = hs.hotkey.bind({ "ctrl", "alt", "cmd" }, "q", function()
     claudeNudgeSetQuiet(not claudeNudgeQueue.quiet)
 end)
 
--- open: the card (or a summary row) is on screen; queued: held back; gone: clicked,
--- closed, or never there.
+-- open: the card (or a summary row) is on screen; queued: held back; gone: clicked or
+-- closed; unknown: a key this Lua session never saw (e.g. Hammerspoon was reloaded).
 function claudeNudgeState(key)
     local isOpen = false
     for _, n in ipairs(claudeNudges) do
@@ -367,6 +379,7 @@ function claudeNudge(title, body, session, action, key)
     if session == "" then session = nil end
     if action == "" or (type(action) == "table" and #action == 0) then action = nil end
     if key == "" then key = nil end
+    if key then Q.markSeen(claudeNudgeQueue, key, os.time()) end
     if key then  -- a re-ask replaces the card; focus untouched, old return target dropped
         removeKeyed(key)
         claudeNudgeReturnTo[key] = nil

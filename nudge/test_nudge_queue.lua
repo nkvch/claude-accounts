@@ -10,7 +10,7 @@ local H  -- per-test world
 
 local function newWorld()
     local w = { canvases = {}, tasks = {}, alerts = {}, prints = {}, timers = {}, hotkeys = {},
-                truth = "idle", binary = true, executed = 0 }
+                truth = "idle", binary = true, executed = 0, now = 100 }
     local Canvas = {}
     Canvas.__index = Canvas
     function Canvas:level() end
@@ -67,7 +67,7 @@ local function newWorld()
             frontmostApplication = function() return { name = function() return "Terminal" end } end,
             get = function() return nil end,
         },
-        timer = { doEvery = function(_, fn)
+        timer = { secondsSinceEpoch = function() return w.now end, doEvery = function(_, fn)
             local t = { fn = fn, stop = function() end }
             w.timers[#w.timers + 1] = t
             return t
@@ -156,7 +156,8 @@ end)
 test("sharing that began after the last poll still holds the card back", function()
     fresh()
     H.truth = "idle"; poll()
-    H.truth = "sharing"  -- no poll yet
+    H.truth = "sharing"  -- no poll yet, and the last one is older than 3 s
+    H.now = H.now + 3.5
     claudeNudge("T", "b", "", "", "k")
     eq(#live(), 0)
     eq(claudeNudgeState("k"), "queued")
@@ -294,7 +295,7 @@ end)
 
 test("state goes queued -> open -> gone for a plain card", function()
     fresh()
-    eq(claudeNudgeState("k"), "gone", "never seen")
+    eq(claudeNudgeState("k"), "unknown", "never seen")
     H.truth = "sharing"; poll()
     claudeNudge("A", "a", "local_1", "", "k")
     eq(claudeNudgeState("k"), "queued")
@@ -368,32 +369,110 @@ test("quiet and sharing together: the queue is released only when both end", fun
     eq(titleOf(live()[1]), "A")
 end)
 
-test("unknown: cards show as before, one console line per spell", function()
+test("unknown for three polls in a row: cards show, one alert and one console line", function()
     fresh()
     H.truth = "banana"; poll(); poll()
+    eq(#H.alerts, 0, "two failed polls are not enough")
+    poll()
+    eq(#H.alerts, 1)
+    eq(H.alerts[1], "Не вижу, шаришь ли ты — карточки идут как обычно")
+    eq(#H.prints, 1)
+    assert(H.prints[1]:match("unknown"), H.prints[1])
+    poll(); poll()
+    eq(#H.alerts, 1, "the same spell warns once")
     claudeNudge("A", "a", "", "", "k")
     eq(#live(), 1)
-    eq(#H.prints, 1, "logged once")
-    assert(H.prints[1]:match("unknown"), H.prints[1])
+    H.truth = "idle"; poll()
+    H.truth = "banana"; poll(); poll(); poll()
+    eq(#H.alerts, 2, "a new spell warns again")
 end)
 
-test("missing detector binary: cards show, one console line", function()
+test("missing detector binary: cards show, a warning after three polls", function()
     fresh()
     H.binary = false
-    H.timers[#H.timers].fn(); H.timers[#H.timers].fn()
+    for _ = 1, 3 do H.timers[#H.timers].fn() end
+    eq(#H.alerts, 1)
+    eq(#H.prints, 1)
+    assert(H.prints[1]:match("claude%-share%-state"), H.prints[1])
     claudeNudge("A", "a", "", "", "k")
     eq(#live(), 1)
     eq(claudeNudgeState("k"), "open")
-    eq(#H.prints, 1)
-    assert(H.prints[1]:match("claude%-share%-state"), H.prints[1])
 end)
 
-test("unknown after sharing releases the queue", function()
+test("a short detector failure does not end a share", function()
     fresh()
     H.truth = "sharing"; poll()
     claudeNudge("A", "a", "", "", "k")
-    H.truth = "banana"; poll()
+    H.truth = "banana"; poll(); poll()
+    eq(#live(), 0, "still held back")
+    eq(claudeNudgeState("k"), "queued")
+    H.truth = "sharing"; poll()
+    H.truth = "banana"; poll(); poll()
+    eq(#live(), 0, "the count started over")
+    eq(#H.alerts, 0)
+end)
+
+test("a long detector failure counts as not sharing and releases the queue", function()
+    fresh()
+    H.truth = "sharing"; poll()
+    claudeNudge("A", "a", "", "", "k")
+    H.truth = "banana"; poll(); poll(); poll()
     eq(titleOf(live()[1]), "A")
+    eq(#H.alerts, 1)
+end)
+
+test("a failed check before a card is not a poll: nothing changes, no alert", function()
+    fresh()
+    H.truth = "sharing"; poll()
+    H.truth = "banana"
+    for i = 1, 5 do
+        H.now = H.now + 4
+        claudeNudge("A" .. i, "a", "", "", "k" .. i)
+    end
+    eq(#live(), 0)
+    eq(#H.alerts, 0)
+    claudeNudge("B", "b", "", "", "kb")
+end)
+
+test("a poll's answer younger than 3 s is used without running the detector", function()
+    fresh()
+    H.truth = "idle"; poll()
+    H.truth = "sharing"
+    H.executed = 0
+    H.now = H.now + 2.9
+    claudeNudge("A", "a", "", "", "ka")
+    eq(H.executed, 0, "the detector was not run")
+    eq(#live(), 1, "the poll said idle")
+    H.now = H.now + 0.2
+    claudeNudge("B", "b", "", "", "kb")
+    eq(H.executed, 1, "older than 3 s: asked again")
+    eq(claudeNudgeState("kb"), "queued")
+    eq(claudeNudgeState("ka"), "queued", "and the card on screen goes down")
+end)
+
+test("a key this session never saw is unknown, a lost one is gone; a reload of the code keeps that", function()
+    fresh()
+    eq(claudeNudgeState("nope"), "unknown")
+    eq(claudeNudgeState(""), "unknown")
+    claudeNudge("A", "a", "", "", "ka"); claudeNudge("B", "b", "", "", "kb"); claudeNudge("C", "c", "", "", "kc")
+    live()[1]:click(nil)
+    live()[1]:click("close")
+    claudeNudgeDismissKey("kc")
+    for _, k in ipairs({ "ka", "kb", "kc" }) do eq(claudeNudgeState(k), "gone", k) end
+    H.truth = "sharing"; poll()
+    claudeNudge("D", "d", "", "", "kd")
+    dofile(HERE .. "/claude_nudge.lua")  -- Hammerspoon's init.lua runs it again
+    for _, k in ipairs({ "ka", "kb", "kc" }) do eq(claudeNudgeState(k), "gone", k) end
+    eq(claudeNudgeState("kd"), "queued")
+    eq(claudeNudgeState("nope"), "unknown")
+end)
+
+test("a queued key replaced or dropped before it was shown is still gone, not unknown", function()
+    fresh()
+    H.truth = "sharing"; poll()
+    claudeNudge("A", "a", "", "", "ka")
+    claudeNudgeDismissKey("ka")
+    eq(claudeNudgeState("ka"), "gone")
 end)
 
 test("a summary nobody touched is folded into the next one", function()
@@ -528,6 +607,7 @@ test("a share found by the check before a new card takes the old cards down too"
     fresh()
     claudeNudge("A", "a", "", "", "ka")
     H.truth = "sharing"  -- no poll
+    H.now = H.now + 3.5
     claudeNudge("B", "b", "", "", "kb")
     eq(#live(), 0)
     eq(claudeNudgeQueue.queue[1].key, "ka"); eq(claudeNudgeQueue.queue[2].key, "kb")
@@ -571,6 +651,33 @@ test("queue: update returns the items only when suppression ends with a non-empt
     eq(#items, 1); eq(#s.queue, 0)
     eq(Q.update(s, { quiet = true }), nil)
     eq(Q.update(s, { quiet = false }), nil, "empty queue")
+end)
+
+test("queue: observe holds the state through short unknowns", function()
+    local Q = loadQ()
+    local s = Q.new()
+    s.capture = "sharing"
+    local st, warn = Q.observe(s, "unknown", true); eq(st, "sharing"); eq(warn, false)
+    st, warn = Q.observe(s, "unknown", false); eq(st, "sharing", "a check before a card"); eq(warn, false)
+    st, warn = Q.observe(s, "unknown", true); eq(st, "sharing"); eq(warn, false)
+    st, warn = Q.observe(s, "unknown", true); eq(st, "unknown"); eq(warn, true)
+    st, warn = Q.observe(s, "unknown", true); eq(st, "unknown"); eq(warn, false)
+    st, warn = Q.observe(s, "idle", true); eq(st, "idle"); eq(warn, false)
+end)
+
+test("queue: stateOf", function()
+    local Q = loadQ()
+    local s = Q.new()
+    eq(Q.stateOf(s, "k", false), "unknown")
+    Q.markSeen(s, "k", 1)
+    eq(Q.stateOf(s, "k", false), "gone")
+    eq(Q.stateOf(s, "k", true), "open")
+    Q.enqueue(s, { title = "t", key = "k" })
+    eq(Q.stateOf(s, "k", false), "queued")
+    Q.markSeen(s, "other", 1 + 8 * 24 * 3600)
+    eq(Q.stateOf(s, "k", false), "queued")
+    Q.remove(s.queue, "k")
+    eq(Q.stateOf(s, "k", false), "unknown", "forgotten after a week")
 end)
 
 test("queue: update tells when the suppression begins", function()

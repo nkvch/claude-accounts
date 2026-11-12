@@ -7,7 +7,38 @@
 local Q = {}
 
 function Q.new()
-    return { queue = {}, quiet = false, capture = "idle" }
+    return Q.ensure({ queue = {}, quiet = false, capture = "idle" })
+end
+
+-- A state kept by an earlier load of this code may lack newer fields.
+function Q.ensure(s)
+    s.unknownRuns = s.unknownRuns or 0
+    s.seen = s.seen or {}  -- key -> time it was last raised; this Lua session only
+    return s
+end
+
+-- One detector answer in. A short `unknown` (a hiccup of the detector) does not end
+-- a share: the earlier state holds until UNKNOWN_POLLS polls in a row failed, then the
+-- state is `unknown` (cards show) and warn is true once. A failed check made
+-- just before a card (not a poll) changes nothing.
+local UNKNOWN_POLLS = 3
+function Q.observe(s, word, isPoll)
+    if word ~= "unknown" then
+        s.unknownRuns = 0
+        return word, false
+    end
+    if not isPoll then return s.capture, false end
+    s.unknownRuns = s.unknownRuns + 1
+    if s.unknownRuns < UNKNOWN_POLLS then return s.capture, false end
+    return "unknown", s.unknownRuns == UNKNOWN_POLLS
+end
+
+local SEEN_TTL_S = 7 * 24 * 3600
+function Q.markSeen(s, key, now)
+    s.seen[key] = now
+    for k, at in pairs(s.seen) do
+        if now - at > SEEN_TTL_S then s.seen[k] = nil end
+    end
 end
 
 -- The detector prints one word; anything else, or no answer, is `unknown`.
@@ -74,11 +105,14 @@ function Q.holdShown(s, items)
     for _, it in ipairs(items) do Q.add(s.queue, it) end
 end
 
--- `queued` while held back, `open` is decided by the caller (it owns the canvases).
+-- `open` is decided by the caller (it owns the canvases). `gone` only for a key this
+-- session raised and has since lost; a key it never saw (a Hammerspoon reload
+-- forgets them all) is `unknown`, not an answer.
 function Q.stateOf(s, key, isOpen)
     if isOpen then return "open" end
     if Q.has(s.queue, key) then return "queued" end
-    return "gone"
+    if key and s.seen[key] then return "gone" end
+    return "unknown"
 end
 
 local function cut(text, max)

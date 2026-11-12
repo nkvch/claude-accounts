@@ -58,8 +58,15 @@ fi
 say_step "Chat banner (Hammerspoon)"
 mkdir -p "$CONF/bin"
 ln -sf "$REPO/nudge/claude-nudge" "$CONF/bin/claude-nudge"
-swiftc -O "$REPO/nudge/share_state.swift" -o "$CONF/bin/claude-share-state" 2>/dev/null ||
-  echo "claude-share-state not built (needs swiftc); the banner will not hold cards while you share the screen"
+# Rebuilt only when the source is newer than the binary (or there is none); a failed
+# build removes the old binary, so "off" is true, and says why.
+SHARE_BIN="$CONF/bin/claude-share-state"
+if [ ! -x "$SHARE_BIN" ] || [ "$REPO/nudge/share_state.swift" -nt "$SHARE_BIN" ]; then
+  if ! swiftc -O "$REPO/nudge/share_state.swift" -o "$SHARE_BIN"; then
+    rm -f "$SHARE_BIN"
+    echo "детектор шаринга выключен: карточки будут видны при шаринге (swiftc не собрал nudge/share_state.swift, причина выше)"
+  fi
+fi
 if [ -d /Applications/Hammerspoon.app ] || [ -d "$HOME/Applications/Hammerspoon.app" ]; then
   HS_INIT="$HOME/.hammerspoon/init.lua"
   mkdir -p "$(dirname "$HS_INIT")"

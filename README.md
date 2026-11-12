@@ -87,16 +87,20 @@ that captures it; `~/.claude-accounts/bin/claude-share-state` reports it, polled
 is drawn, and cards already on screen when it begins are taken down. Cards wait in a queue, and when the capture ends one summary card comes: "Пока ты шарил: N"
 with a line per card, "title — first line of the body" (up to 6 lines, the rest as "… и ещё N").
 A click on a line does what a click on that card would and removes the line; the ✕ drops the whole
-summary. A lone waiting card comes back as itself. If the detector is missing or fails, cards show
-as usual and Hammerspoon's console says so once.
+summary. A lone waiting card comes back as itself. A single failed detector run changes nothing;
+after three polls in a row (9 s) the screen counts as not shared, cards show as usual, and a
+"Не вижу, шаришь ли ты" alert and a console line say so once. `install.sh` builds the detector with
+`swiftc`, only when the source is newer than the binary; if the build fails it prints swiftc's error
+and "детектор шаринга выключен".
 
 ctrl+alt+cmd+Q switches the same hold-back on by hand ("Тихо") and off ("Снова зову"), for when
 nothing is being captured but you do not want to be interrupted.
 
 `--key KEY` names a card: a card with the same key replaces the earlier one (also in the queue),
 and a script can ask what became of it with
-`hs -c 'return claudeNudgeState("KEY")'`: `open` (on screen), `queued` (held back) or `gone`
-(clicked, closed, or never raised).
+`hs -c 'return claudeNudgeState("KEY")'`: `open` (on screen), `queued` (held back), `gone`
+(clicked or closed) or `unknown` (a key Hammerspoon has not seen since it was last reloaded, so the
+card is lost, not answered).
 
 To have every chat call you this way, add to `~/.claude/CLAUDE.md`:
 

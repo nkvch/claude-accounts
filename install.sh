@@ -67,6 +67,19 @@ if [ ! -x "$SHARE_BIN" ] || [ "$REPO/nudge/share_state.swift" -nt "$SHARE_BIN" ]
     echo "детектор шаринга выключен: карточки будут видны при шаринге (swiftc не собрал nudge/share_state.swift, причина выше)"
   fi
 fi
+# The user-browser plugin (Claude Bridge) calls `notify` from its data directory when an agent needs
+# you; point it at the banner. A notify that is not ours stays as it is.
+for UB_DATA in "$HOME"/.claude/plugins/data/user-browser-*/user-browser; do
+  [ -d "$UB_DATA" ] || continue
+  if [ -L "$UB_DATA/notify" ] && [ "$(readlink "$UB_DATA/notify")" = "$REPO/nudge/user-browser-notify" ]; then
+    echo "user-browser: notify already points at the banner ($UB_DATA)"
+  elif [ -e "$UB_DATA/notify" ] || [ -L "$UB_DATA/notify" ]; then
+    echo "user-browser: $UB_DATA/notify exists and is not ours, skipped"
+  else
+    ln -s "$REPO/nudge/user-browser-notify" "$UB_DATA/notify"
+    echo "user-browser: notifications go to the banner ($UB_DATA/notify)"
+  fi
+done
 if [ -d /Applications/Hammerspoon.app ] || [ -d "$HOME/Applications/Hammerspoon.app" ]; then
   HS_INIT="$HOME/.hammerspoon/init.lua"
   mkdir -p "$(dirname "$HS_INIT")"

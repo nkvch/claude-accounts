@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Notification hook for the user-browser plugin (Claude Bridge): shows its "an agent needs
+# you" cards through the claude-nudge banner, so they also hide while the screen is shared.
+#
+#   user-browser-notify show <key> <title> <body> <click-command...>
+#   user-browser-notify dismiss <key> [return]
+#
+# Contract: skills/user-browser/SETUP.md in the plugin, "Notification hook". title and body are
+# untrusted and the click command carries a one-time token: all of it goes to Hammerspoon as
+# files in a private directory, never into code, the shell, a log or the output.
+set -euo pipefail
+umask 077
+
+HS=$(command -v hs || ls {,"$HOME"}/Applications/Hammerspoon.app/Contents/Frameworks/hs/hs 2>/dev/null | head -1 || true)
+[ -n "$HS" ] || { echo "user-browser-notify: Hammerspoon's hs not found" >&2; exit 1; }
+
+cmd="${1:-}"
+case "$cmd" in
+  show) [ $# -ge 5 ] || { echo "usage: user-browser-notify show KEY TITLE BODY CLICK-COMMAND..." >&2; exit 2; } ;;
+  dismiss) [ $# -ge 2 ] && [ $# -le 3 ] || { echo "usage: user-browser-notify dismiss KEY [return]" >&2; exit 2; } ;;
+  *) echo "usage: user-browser-notify show|dismiss ..." >&2; exit 2 ;;
+esac
+
+# Hammerspoon only reads directories named like this, made of plain path characters.
+DIR=$(mktemp -d "${TMPDIR:-/tmp}/ub-notify.XXXXXX" 2>/dev/null || true)
+[[ "$DIR" =~ ^[A-Za-z0-9/._-]+$ ]] || { [ -z "$DIR" ] || rm -rf "$DIR"; DIR=$(mktemp -d /tmp/ub-notify.XXXXXX); }
+trap 'rm -rf "$DIR"' EXIT
+
+printf '%s' "$2" > "$DIR/key"
+if [ "$cmd" = show ]; then
+  printf '%s' "$3" > "$DIR/title"
+  printf '%s' "$4" > "$DIR/body"
+  shift 4
+  printf '%s\0' "$@" > "$DIR/argv"
+  FN=claudeNudgeFromDir
+else
+  [ "${3:-}" != return ] || printf 'true' > "$DIR/return"
+  FN=claudeNudgeDismissFromDir
+fi
+
+# Lua reads and deletes the files before returning; -t keeps us inside the hook's 3 s.
+"$HS" -t 2 -c "$FN(\"$DIR\")" </dev/null >/dev/null 2>&1

@@ -102,6 +102,14 @@ and a script can ask what became of it with
 (clicked or closed) or `unknown` (a key Hammerspoon has not seen since it was last reloaded, so the
 card is lost, not answered).
 
+The user-browser plugin (Claude Bridge) calls a notification hook when an agent in your browser
+needs you. `install.sh` links `nudge/user-browser-notify` as `notify` in the plugin's data
+directory (`~/.claude/plugins/data/user-browser-*/user-browser/`), so those requests raise the same
+card, held back while the screen is shared. A `notify` already there is left alone and `install.sh`
+says so; point `USER_BROWSER_NOTIFY_HOOK` at the script instead. The hook passes the text to
+Hammerspoon as files in a private temporary directory, never as code, and the click command it
+carries is never logged. `nudge/test_user_browser_notify.sh` checks it with a fake `hs`.
+
 To have every chat call you this way, add to `~/.claude/CLAUDE.md`:
 
 ```markdown

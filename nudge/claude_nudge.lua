@@ -328,7 +328,8 @@ local function freshCheck()
     if lastPollAt and hs.timer.secondsSinceEpoch() - lastPollAt < FRESH_S then return end
     local bin = shareStateBin()
     if not hs.fs.attributes(bin) then return applyCapture("unknown", "no " .. bin, false) end
-    local out = hs.execute("'" .. (bin:gsub("'", "'\\''")) .. "'")
+    -- At most 1 s: this runs on Hammerspoon's main thread (a killed run reads as unknown).
+    local out = hs.execute("/usr/bin/perl -e 'alarm 1; exec @ARGV' '" .. (bin:gsub("'", "'\\''")) .. "'")
     applyCapture(Q.parseState(out), nil, false)
 end
 

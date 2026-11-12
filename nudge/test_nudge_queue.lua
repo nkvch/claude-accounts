@@ -341,7 +341,7 @@ test("quiet mode: hotkey toggles, cards wait, switching off shows the summary", 
     hk.fn()
     eq(H.alerts[#H.alerts], "Снова зову")
     eq(#live(), 1)
-    eq(live()[1]:texts()[1], "Пока ты шарил: 2")
+    eq(live()[1]:texts()[1], "Пока было тихо: 2", "nothing was shared")
 end)
 
 test("quiet and sharing together: the queue is released only when both end", function()
@@ -600,7 +600,7 @@ test("the quiet mode taking effect also takes the cards on screen down", functio
     eq(#live(), 0)
     eq(claudeNudgeState("ka"), "queued")
     hk.fn()
-    eq(live()[1]:texts()[1], "Пока ты шарил: 2")
+    eq(live()[1]:texts()[1], "Пока было тихо: 2")
 end)
 
 test("a share found by the check before a new card takes the old cards down too", function()

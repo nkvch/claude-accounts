@@ -91,6 +91,11 @@ function Q.update(s, change)
     if change.quiet ~= nil then s.quiet = change.quiet end
     if change.capture ~= nil then s.capture = change.capture end
     local now = Q.suppressed(s)
+    if now and s.capture == "sharing" then s.sharedInHold = true end
+    if was and not now then
+        -- Whether this hold saw a share: names the summary ("ты шарил" vs "было тихо").
+        s.lastHoldShared, s.sharedInHold = s.sharedInHold or false, false
+    end
     if was and not now and #s.queue > 0 then
         local items = s.queue
         s.queue = {}

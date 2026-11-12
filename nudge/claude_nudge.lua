@@ -197,7 +197,7 @@ local function drawSummary(items)
     c[2] = { type = "rectangle", action = "stroke", strokeWidth = 2,
              strokeColor = { red = 0.98, green = 0.62, blue = 0.20, alpha = 1.0 },
              roundedRectRadii = { xRadius = 12, yRadius = 12 } }
-    c[3] = { type = "text", text = "Пока ты шарил: " .. #items,
+    c[3] = { type = "text", text = (claudeNudgeQueue.lastHoldShared == false and "Пока было тихо: " or "Пока ты шарил: ") .. #items,
              textColor = { red = 0.98, green = 0.72, blue = 0.30, alpha = 1 },
              textSize = 15, textFont = "Menlo-Bold",
              frame = { x = pad, y = pad - 4, w = w - pad * 2 - 24, h = titleH } }

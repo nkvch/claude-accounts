@@ -68,4 +68,20 @@ check "key injection"    "T" "B" "$SID" "$SID" '"); os.execute("x"); ("' after
 check "key newline"      "T" "B" "$SID" "$SID" $'k\n1' after
 check "key no session"   "T" "B" "" "" "call-9"
 
+# After `--`, everything is text, even a title or body that looks like the flag.
+dd() {  # dd NAME TITLE BODY
+  printf '%s' "$2" > "$TMP/title"; printf '%s' "$3" > "$TMP/body"; printf '%s' "$SID" > "$TMP/session"; rm -f "$TMP/key"
+  PATH="$TMP/bin:$PATH" CLAUDE_CODE_HOST_SESSION_ID="$SID" "$HERE/claude-nudge" -- "$2" "$3" && lua - "$TMP" <<'LUA'
+local dir = arg[1]
+local function slurp(n) local f = assert(io.open(dir .. "/" .. n, "rb")); local s = f:read("a"); f:close(); return s end
+local got
+function claudeNudge(...) got = table.pack(...) end
+assert(load(slurp("call.lua")))()
+assert(got.n == 3 and got[1] == slurp("title") and got[2] == slurp("body"))
+LUA
+  if [ $? = 0 ]; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi
+}
+dd "-- then --key title"  "--key" "body"
+dd "-- then --key= body"  "Title" "--key=x"
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

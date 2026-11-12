@@ -693,6 +693,23 @@ test("queue: update tells when the suppression begins", function()
     eq(began, false)
 end)
 
+test("a card does not run the detector while a poll's run is still going", function()
+    fresh()
+    H.truth = "idle"; poll()
+    H.now = H.now + 10
+    H.timers[#H.timers].fn()  -- a poll starts and hangs
+    H.executed = 0
+    claudeNudge("A", "a", "", "", "ka")
+    eq(H.executed, 0, "no blocking detector run next to a hanging one")
+    eq(#live(), 1, "the card shows")
+end)
+
+test("state of no key is unknown", function()
+    fresh()
+    claudeNudge("A", "a", "", "", "")
+    eq(claudeNudgeState(nil), "unknown")
+end)
+
 -- ---------------------------------------------------------------- run
 local failed = 0
 for _, name in ipairs(order) do

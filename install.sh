@@ -69,12 +69,14 @@ if [ ! -x "$SHARE_BIN" ] || [ "$REPO/nudge/share_state.swift" -nt "$SHARE_BIN" ]
 fi
 # The user-browser plugin (Claude Bridge) calls `notify` from its data directory when an agent needs
 # you; point it at the banner. A notify that is not ours stays as it is.
-for UB_DATA in "$HOME"/.claude/plugins/data/user-browser-*/user-browser; do
+# Its data directory: USER_BROWSER_DATA_DIR, else ~/.local/share/user-browser (the CLI's
+# default), plus any per-plugin data directory Claude Code made for it.
+for UB_DATA in "${USER_BROWSER_DATA_DIR:-$HOME/.local/share/user-browser}" "$HOME"/.claude/plugins/data/user-browser-*/user-browser; do
   [ -d "$UB_DATA" ] || continue
   if [ -L "$UB_DATA/notify" ] && [ "$(readlink "$UB_DATA/notify")" = "$REPO/nudge/user-browser-notify" ]; then
     echo "user-browser: notify already points at the banner ($UB_DATA)"
   elif [ -e "$UB_DATA/notify" ] || [ -L "$UB_DATA/notify" ]; then
-    echo "user-browser: $UB_DATA/notify exists and is not ours, skipped"
+    echo "user-browser: $UB_DATA/notify exists and is not ours, skipped (to use the banner: ln -sfn \"$REPO/nudge/user-browser-notify\" \"$UB_DATA/notify\")"
   else
     ln -s "$REPO/nudge/user-browser-notify" "$UB_DATA/notify"
     echo "user-browser: notifications go to the banner ($UB_DATA/notify)"

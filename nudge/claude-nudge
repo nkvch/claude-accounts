@@ -2,6 +2,7 @@
 # Raise a banner in the top-right corner of the screen that stays until clicked.
 #
 #   claude-nudge "Title" "What exactly needs doing" [--key KEY]
+#   claude-nudge [--key KEY] -- "$TITLE" "$BODY"   # text that may start with --key
 #
 # With --key, a later card with the same key replaces this one, and
 # `hs -c 'return claudeNudgeState("KEY")'` says whether it is still `open`, held
@@ -19,6 +20,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --key) KEY="${2:?usage: claude-nudge TITLE BODY [--key KEY]}"; shift 2 ;;
     --key=*) KEY="${1#--key=}"; shift ;;
+    --) shift; POS+=("$@"); break ;;
     *) POS+=("$1"); shift ;;
   esac
 done

@@ -317,11 +317,14 @@ end
 
 local FRESH_S = 3
 local lastPollAt
+local pollTask, pollStarted  -- the timer's detector run (poll, below)
 
 -- Asked right before a card is drawn, so a share that began since the last poll
 -- still holds it back. A poll's answer younger than FRESH_S is used as it is.
 local function freshCheck()
     if claudeNudgeQueue.capture == "sharing" then return end  -- the poll ends it
+    -- A detector run is already going (maybe hanging): never block Hammerspoon on a second one.
+    if pollTask and pollTask:isRunning() then return end
     if lastPollAt and hs.timer.secondsSinceEpoch() - lastPollAt < FRESH_S then return end
     local bin = shareStateBin()
     if not hs.fs.attributes(bin) then return applyCapture("unknown", "no " .. bin, false) end
@@ -329,7 +332,6 @@ local function freshCheck()
     applyCapture(Q.parseState(out), nil, false)
 end
 
-local pollTask, pollStarted
 local function poll()
     if pollTask and pollTask:isRunning() then
         if os.time() - pollStarted > 10 then pollTask:terminate() end
@@ -368,6 +370,7 @@ end)
 -- open: the card (or a summary row) is on screen; queued: held back; gone: clicked or
 -- closed; unknown: a key this Lua session never saw (e.g. Hammerspoon was reloaded).
 function claudeNudgeState(key)
+    if key == nil or key == "" then return "unknown" end
     local isOpen = false
     for _, n in ipairs(claudeNudges) do
         if n.key == key or (n.summary and Q.has(n.summary, key)) then isOpen = true end

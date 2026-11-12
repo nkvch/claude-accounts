@@ -4,7 +4,9 @@
 # (needs Screen Recording permission for the terminal; run it on a machine nobody shares).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-TMP=$(mktemp -d); trap 'rm -rf "$TMP"; pkill -9 screencapture 2>/dev/null || true' EXIT
+# Only the recording this test starts is stopped; a recording of the user's stays alive.
+REC=""
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"; [ -z "$REC" ] || kill -9 "$REC" 2>/dev/null || true' EXIT
 swiftc -O "$HERE/share_state.swift" -o "$TMP/state"
 
 fails=0
@@ -20,14 +22,14 @@ verr=$("$TMP/state" --verbose 2>&1 >/dev/null || true)
 if printf '%s' "$verr" | grep -q '^CGSIsScreenWatcherPresent='; then echo "ok   --verbose names the signal"
 else echo "FAIL --verbose prints no signal"; fails=$((fails+1)); fi
 
-start=$(python3 -c 'import time;print(time.time())'); "$TMP/state" >/dev/null || true
-ms=$(python3 -c "import time;print(int((time.time()-$start)*1000))")
+# Timed inside one python process, so the interpreter's own start-up is not counted.
+ms=$(python3 -c 'import subprocess,sys,time;t=time.monotonic();subprocess.run([sys.argv[1]],capture_output=True);print(int((time.monotonic()-t)*1000))' "$TMP/state")
 if [ "$ms" -lt 100 ]; then echo "ok   call took ${ms} ms"; else echo "FAIL call took ${ms} ms"; fails=$((fails+1)); fi
 
 if [ "${1:-}" = "--live" ]; then
-  screencapture -v -V 8 "$TMP/rec.mov" & sleep 2
+  screencapture -v -V 8 "$TMP/rec.mov" & REC=$!; sleep 2
   expect "sharing while recording" sharing 0
-  pkill -9 screencapture; sleep 2
+  kill -9 "$REC"; REC=""; sleep 2
   expect "idle after recording" idle 1
 fi
 

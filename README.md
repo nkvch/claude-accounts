@@ -87,7 +87,8 @@ that captures it; `~/.claude-accounts/bin/claude-share-state` reports it, polled
 is drawn, and cards already on screen when it begins are taken down. Cards wait in a queue, and when the capture ends one summary card comes: "Пока ты шарил: N"
 with a line per card, "title — first line of the body" (up to 6 lines, the rest as "… и ещё N").
 A click on a line does what a click on that card would and removes the line; the ✕ drops the whole
-summary. A lone waiting card comes back as itself. A single failed detector run changes nothing;
+summary. `claude-nudge --key K -- "$TITLE" "$BODY"` keeps a title or body that starts with
+`--key` as text. A lone waiting card comes back as itself. A single failed detector run changes nothing;
 after three polls in a row (9 s) the screen counts as not shared, cards show as usual, and a
 "Не вижу, шаришь ли ты" alert and a console line say so once. `install.sh` builds the detector with
 `swiftc`, only when the source is newer than the binary; if the build fails it prints swiftc's error
@@ -104,7 +105,8 @@ card is lost, not answered).
 
 The user-browser plugin (Claude Bridge) calls a notification hook when an agent in your browser
 needs you. `install.sh` links `nudge/user-browser-notify` as `notify` in the plugin's data
-directory (`~/.claude/plugins/data/user-browser-*/user-browser/`), so those requests raise the same
+directory (`$USER_BROWSER_DATA_DIR`, else `~/.local/share/user-browser/`, and any
+`~/.claude/plugins/data/user-browser-*/user-browser/`), so those requests raise the same
 card, held back while the screen is shared. A `notify` already there is left alone and `install.sh`
 says so; point `USER_BROWSER_NOTIFY_HOOK` at the script instead. The hook passes the text to
 Hammerspoon as files in a private temporary directory, never as code, and the click command it

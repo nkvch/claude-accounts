@@ -82,6 +82,22 @@ The card knows its chat from `$CLAUDE_CODE_HOST_SESSION_ID`, which the desktop a
 Code session, sub-sessions and scheduled tasks included. Run outside the app, the card still shows
 and a click only dismisses it.
 
+While your screen is shared or recorded (Meet, Zoom, Teams, QuickTime, Cmd+Shift+5, OBS, anything
+that captures it; `~/.claude-accounts/bin/claude-share-state` reports it, polled every 3 s), no card
+is drawn. Cards wait in a queue, and when the capture ends one summary card comes: "Пока ты шарил: N"
+with a line per card, "title — first line of the body" (up to 6 lines, the rest as "… и ещё N").
+A click on a line does what a click on that card would and removes the line; the ✕ drops the whole
+summary. A lone waiting card comes back as itself. If the detector is missing or fails, cards show
+as usual and Hammerspoon's console says so once.
+
+ctrl+alt+cmd+Q switches the same hold-back on by hand ("Тихо") and off ("Снова зову"), for when
+nothing is being captured but you do not want to be interrupted.
+
+`--key KEY` names a card: a card with the same key replaces the earlier one (also in the queue),
+and a script can ask what became of it with
+`hs -c 'return claudeNudgeState("KEY")'`: `open` (on screen), `queued` (held back) or `gone`
+(clicked, closed, or never raised).
+
 To have every chat call you this way, add to `~/.claude/CLAUDE.md`:
 
 ```markdown

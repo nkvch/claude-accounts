@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Raise a banner in the top-right corner of the screen that stays until clicked.
 #
-#   claude-nudge "Title" "What exactly needs doing"
+#   claude-nudge "Title" "What exactly needs doing" [--key KEY]
+#
+# With --key, a later card with the same key replaces this one, and
+# `hs -c 'return claudeNudgeState("KEY")'` says whether it is still `open`, held
+# back (`queued`, while the screen is shared) or `gone` (clicked or closed).
 #
 # Run from a Claude Code session in the desktop app, the banner remembers that
 # session ($CLAUDE_CODE_HOST_SESSION_ID): a click opens that chat in
@@ -9,8 +13,17 @@
 # (install.sh does it).
 set -euo pipefail
 
-TITLE="${1:?usage: claude-nudge TITLE BODY}"
-BODY="${2:-}"
+KEY=""
+POS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --key) KEY="${2:?usage: claude-nudge TITLE BODY [--key KEY]}"; shift 2 ;;
+    --key=*) KEY="${1#--key=}"; shift ;;
+    *) POS+=("$1"); shift ;;
+  esac
+done
+TITLE="${POS[0]:?usage: claude-nudge TITLE BODY [--key KEY]}"
+BODY="${POS[1]:-}"
 SESSION="${CLAUDE_CODE_HOST_SESSION_ID:-}"
 [[ "$SESSION" =~ ^local_[0-9a-f-]+$ ]] || SESSION=""
 
@@ -19,4 +32,6 @@ esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS=""} NR>
 
 # The `hs` command ships inside the app; hs.ipc.cliInstall() only adds it to PATH.
 HS=$(command -v hs || ls {,"$HOME"}/Applications/Hammerspoon.app/Contents/Frameworks/hs/hs 2>/dev/null | head -1 || true)
-"$HS" -c "claudeNudge(\"$(esc "$TITLE")\", \"$(esc "$BODY")\", \"$SESSION\")" </dev/null >/dev/null
+ARGS="\"$(esc "$TITLE")\", \"$(esc "$BODY")\", \"$SESSION\""
+[ -z "$KEY" ] || ARGS="$ARGS, \"\", \"$(esc "$KEY")\""
+"$HS" -c "claudeNudge($ARGS)" </dev/null >/dev/null

@@ -58,6 +58,8 @@ fi
 say_step "Chat banner (Hammerspoon)"
 mkdir -p "$CONF/bin"
 ln -sf "$REPO/nudge/claude-nudge" "$CONF/bin/claude-nudge"
+swiftc -O "$REPO/nudge/share_state.swift" -o "$CONF/bin/claude-share-state" 2>/dev/null ||
+  echo "claude-share-state not built (needs swiftc); the banner will not hold cards while you share the screen"
 if [ -d /Applications/Hammerspoon.app ] || [ -d "$HOME/Applications/Hammerspoon.app" ]; then
   HS_INIT="$HOME/.hammerspoon/init.lua"
   mkdir -p "$(dirname "$HS_INIT")"

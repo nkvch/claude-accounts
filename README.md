@@ -73,6 +73,11 @@ you can then run Lua in Hammerspoon.
 ~/.claude-accounts/bin/claude-nudge "Deploy is stuck" "Need SSH access to the server"
 ```
 
+`install.sh` also builds `~/.claude-accounts/bin/claude-share-state` from `nudge/share_state.swift`. It prints
+`sharing` (exit 0) while any screen sharing or recording is running, `idle` (exit 1) otherwise, and
+`unknown` (exit 2, reason on stderr) if it cannot tell; `--verbose` shows the signal. It reads
+SkyLight's private `CGSIsScreenWatcherPresent`, which is true for `screencapture -v` on macOS 26.
+
 The card knows its chat from `$CLAUDE_CODE_HOST_SESSION_ID`, which the desktop app sets in every
 Code session, sub-sessions and scheduled tasks included. Run outside the app, the card still shows
 and a click only dismisses it.

@@ -33,9 +33,10 @@ git clone https://github.com/nkvch/claude-accounts.git ~/claude-accounts
 ```
 
 Then quit Claude and open **Claude Launcher** from `~/Applications` (put it in the Dock and use it
-instead of Claude). The launcher rebuilds the patched copy (`~/Applications/Claude Accounts.app`)
-whenever Claude updates; if a Claude update ever breaks the patch, it opens the official app and
-tells you.
+instead of Claude). On every launch it first updates Claude when it was installed with Homebrew
+(`brew upgrade --cask --greedy claude`), then rebuilds the patched copy
+(`~/Applications/Claude Accounts.app`) if Claude changed. The official app is never opened: if an
+update ever breaks the patch, the launcher opens the previous patched copy and tells you.
 
 Set the plan of the account Claude Desktop is signed in to in `~/.claude-accounts/accounts.json`
 (`plan`, and `proX` = times Pro usage per week: Pro 1, Max 5x 5, Ultra 10, Max 20x 20, Team Premium 6.25).

@@ -14,27 +14,43 @@ echo "== $(date)"
 if pgrep -f "^$DST/Contents/MacOS/Claude" >/dev/null; then open -a "$DST"; exit 0; fi
 
 # Both copies share one data folder, so only one may run: quit the official one.
+# Fails when it is still alive afterwards (unsaved dialog, hang), so nothing else may start.
 quit_official() {
-  if pgrep -f "^/Applications/Claude.app/Contents/MacOS/Claude" >/dev/null; then
-    osascript -e 'tell application "/Applications/Claude.app" to quit'
-    for _ in $(seq 1 30); do pgrep -f "^/Applications/Claude.app/Contents/MacOS/Claude" >/dev/null || break; sleep 1; done
-  fi
+  pgrep -f "^/Applications/Claude.app/Contents/MacOS/Claude" >/dev/null || return 0
+  osascript -e 'tell application "/Applications/Claude.app" to quit'
+  for _ in $(seq 1 30); do pgrep -f "^/Applications/Claude.app/Contents/MacOS/Claude" >/dev/null || return 0; sleep 1; done
+  echo "official Claude is still running"
+  osascript -e 'display notification "Quit the official Claude first, then open Claude Accounts again." with title "Claude Accounts"'
+  return 1
 }
-quit_official
+quit_official || exit 1
 
 # The patched copy never updates itself; when Claude came from Homebrew, update the official
 # app first so the rebuild below always starts from the latest version.
 BREW=$(command -v brew || ls /opt/homebrew/bin/brew /usr/local/bin/brew 2>/dev/null | head -1)
-if [ -n "$BREW" ] && "$BREW" list --cask claude >/dev/null 2>&1 \
-  && [ -n "$("$BREW" outdated --cask --greedy --quiet claude)" ]; then
-  osascript -e 'display notification "Updating Claude to the latest version…" with title "Claude Accounts"'
-  if "$BREW" upgrade --cask --greedy claude; then
-    echo "brew: upgraded"
+if [ -z "$BREW" ]; then
+  echo "update skipped: brew not found"
+elif ! "$BREW" list --cask claude >/dev/null 2>&1; then
+  echo "update skipped: Claude is not a Homebrew cask"
+else
+  # brew outdated may exit non-zero when something is outdated: judge by its output first.
+  outdated=$("$BREW" outdated --cask --greedy --quiet claude)
+  status=$?
+  if [ -n "$outdated" ]; then
+    osascript -e 'display notification "Updating Claude to the latest version…" with title "Claude Accounts"'
+    if "$BREW" upgrade --cask --greedy claude; then
+      echo "brew: upgraded"
+    else
+      echo "brew: upgrade failed, continuing with the installed Claude"
+      osascript -e "display notification \"Claude update failed; using the installed version. Details: $LOG\" with title \"Claude Accounts\""
+    fi
+    quit_official || exit 1
+  elif [ "$status" -ne 0 ]; then
+    echo "brew: outdated check failed (exit $status), continuing with the installed Claude"
+    osascript -e "display notification \"Could not check for a Claude update; using the installed version. Details: $LOG\" with title \"Claude Accounts\""
   else
-    echo "brew: upgrade failed, continuing with the installed Claude"
-    osascript -e "display notification \"Claude update failed; using the installed version. Details: $LOG\" with title \"Claude Accounts\""
+    echo "brew: Claude is up to date"
   fi
-  quit_official
 fi
 
 if "$HERE/build.sh"; then

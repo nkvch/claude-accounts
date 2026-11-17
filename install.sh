@@ -38,7 +38,17 @@ say_step "Claude Launcher in ~/Applications"
 mkdir -p "$HOME/Applications"
 rm -rf "$LAUNCHER"
 osacompile -o "$LAUNCHER" -e "do shell script quoted form of \"$APP/launch.sh\" & \" >/dev/null 2>&1 &\""
-cp /Applications/Claude.app/Contents/Resources/electron.icns "$LAUNCHER/Contents/Resources/applet.icns" 2>/dev/null || true
+# The applet's Info.plist names an icon in its own Assets.car (the script icon), which wins over
+# applet.icns: take Claude's catalog and icon name instead, then re-sign the changed bundle.
+CLAUDE_RES=/Applications/Claude.app/Contents/Resources
+if cp "$CLAUDE_RES/Assets.car" "$LAUNCHER/Contents/Resources/Assets.car" \
+  && cp "$CLAUDE_RES/electron.icns" "$LAUNCHER/Contents/Resources/applet.icns" \
+  && /usr/libexec/PlistBuddy -c "Set :CFBundleIconName $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' /Applications/Claude.app/Contents/Info.plist)" "$LAUNCHER/Contents/Info.plist" \
+  && codesign --force --sign - "$LAUNCHER" 2>/dev/null; then
+  :
+else
+  echo "  Could not give Claude Launcher Claude's icon; it keeps the script icon."
+fi
 touch "$LAUNCHER"
 
 say_step "Building the patched copy (~/Applications/Claude Accounts.app)"

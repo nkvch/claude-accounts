@@ -1,5 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { LIMITS_FRESH_MS, WATCH_EVERY_MS } from './register'
+
 const PANE = {
   plugin: 'subscriptions', component: 'Pane', requestId: 'subscriptions',
   props: { title: 'Subscriptions', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
@@ -152,6 +154,7 @@ type World = {
   accounts?: unknown
   // the content of state/limits.json: an object, a string (verbatim, e.g. broken JSON) or undefined (no file)
   limits?: unknown
+  demo?: unknown
   acct?: (argv: string[]) => Run | Promise<Run>
 }
 const OK = (stdout: string): Run => ({ exitCode: 0, stdout, stderr: '' })
@@ -166,6 +169,7 @@ async function boot($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('env.get', (_, e) => ({ value: { ...ENV, ...w.env }[e.name] }))
   const read = (path: string) => {
+    if (path.endsWith('demo.json')) return w.demo === undefined ? undefined : JSON.stringify(w.demo)
     if (path.endsWith('accounts.json')) return JSON.stringify(w.accounts ?? ACCOUNTS)
     if (path.endsWith('state/limits.json') && 'limits' in w) return typeof w.limits === 'string' || w.limits === undefined ? w.limits : JSON.stringify(w.limits)
     if (path.endsWith('state/limits.json')) return JSON.stringify(PROBES)
@@ -290,9 +294,9 @@ test('the dropdown always lists the current and the picked account, even when ac
   const values = async () => ((await ui.find({ type: 'Select', key: 'account' }))?.props.options as { value: string }[]).map(o => o.value).sort()
   expect(await values()).toEqual(['default', 'ghost', 'personal'])
   await ui.select({ key: 'account', value: 'personal' })
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   w.accounts = { accounts: { default: { label: 'Work' } } }
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   expect(await values()).toEqual(['default', 'ghost', 'personal'])
   await ui.unmount()
 })
@@ -325,10 +329,10 @@ test('a change of accounts.json made elsewhere is picked up by the watcher, incl
   const w: World = { acct: () => OK(`${state}\n`) }
   const { ui, clock } = await boot($, on, w)
   expect(await autoButton(ui)).toMatchObject({ label: 'On' })
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   state = 'off'
   w.accounts = { accounts: { default: { label: 'Work' } } }
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   expect(await autoButton(ui)).toMatchObject({ label: 'Off' })
   await ui.unmount()
 })
@@ -348,10 +352,10 @@ test('a slow read that answers after a press does not put the old state back', a
   }
   const { ui, clock } = await boot($, on, w)
   expect(await autoButton(ui)).toMatchObject({ label: 'On' })
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   slow = true
   w.accounts = { accounts: { default: { label: 'Work' } } }
-  void clock.advance(20 * 1000)
+  void clock.advance(WATCH_EVERY_MS)
   await new Promise(r => setTimeout(r, 50))
   await ui.press({ key: 'auto-place' })
   expect(await autoButton(ui)).toMatchObject({ label: 'Off' })
@@ -493,7 +497,7 @@ test('a file the app rewrote is picked up on the next tick, and not before', asy
   expect(await hasText(ui, left(SIDE.seven))).toBe(true)
   w.limits = { ...FILE, side: { ...SIDE, seven: 60, at: now + 1000 } }
   expect(await hasText(ui, left(60))).toBe(false)
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   expect(await hasText(ui, left(60))).toBe(true)
   expect(await hasText(ui, left(SIDE.seven))).toBe(false)
   await ui.unmount()
@@ -505,7 +509,7 @@ test('a new subscription whose numbers the app has written shows up on the next 
   expect(await hasText(ui, left(SIDE.seven))).toBe(false)
   w.accounts = ACCOUNTS
   w.limits = FILE
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   expect(await hasText(ui, left(SIDE.seven))).toBe(true)
   await ui.unmount()
 })
@@ -524,10 +528,10 @@ test('a file that is torn once keeps the last good numbers and is read again on 
   const w: World = { limits: FILE }
   const { ui, clock } = await boot($, on, w)
   w.limits = '{"default": {"five": 1'
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   expect(await hasText(ui, left(WORK.seven))).toBe(true)
   w.limits = { ...FILE, default: { ...WORK, seven: 50, at: now + 1000 } }
-  await clock.advance(20 * 1000)
+  await clock.advance(WATCH_EVERY_MS)
   expect(await hasText(ui, left(50))).toBe(true)
   await ui.unmount()
 })
@@ -535,7 +539,8 @@ test('a file that is torn once keeps the last good numbers and is read again on 
 test('an account the file could not check shows its error, an account with no numbers shows no invented bar', async ($, on) => {
   const limits = { default: WORK, side: { error: 'org_disabled', at: now }, personal: { unknown: true, status: 'allowed', at: now } }
   const { ui } = await boot($, on, { limits })
-  expect(await ui.find({ type: 'Text', text: /Couldn't check: org_disabled/ })).toBeTruthy()
+  expect(await ui.find({ key: 'error-side' })).toBeTruthy()
+  expect(await ui.find({ key: 'error-default' })).toBeFalsy()
   expect(await ui.find({ type: 'Box', key: 'track-personal-7' })).toBeFalsy()
   expect(await ui.find({ type: 'Box', key: 'track-side-7' })).toBeFalsy()
   await ui.unmount()
@@ -555,5 +560,65 @@ test('an account that is in the file but no longer in accounts.json is not drawn
   const { ui } = await boot($, on, { limits: { ...FILE, removed: { ...SIDE, seven: 71 } } })
   expect(await hasText(ui, left(SIDE.seven))).toBe(true)
   expect(await hasText(ui, left(71))).toBe(false)
+  await ui.unmount()
+})
+
+test('every account in accounts.json has a card, also one the file has no numbers for yet', async ($, on) => {
+  const { ui } = await boot($, on, { limits: { default: WORK } })
+  expect(await ui.find({ type: 'Box', key: 'card-personal' })).toBeTruthy()
+  expect(await ui.find({ type: 'Box', key: 'card-side' })).toBeTruthy()
+  expect(await ui.find({ type: 'Box', key: 'track-side-7' })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('a subscription added to accounts.json gets its card, name and plan-size bar on the next tick', async ($, on) => {
+  const w: World = { accounts: { accounts: { default: { proX: 10, label: 'Work' } } }, limits: { default: WORK, extra: SIDE } }
+  const { ui, clock } = await boot($, on, w)
+  expect(await ui.find({ type: 'Box', key: 'card-extra' })).toBeFalsy()
+  await clock.advance(WATCH_EVERY_MS) // the first tick only remembers accounts.json
+  w.accounts = { accounts: { default: { proX: 10, label: 'Work' }, extra: { proX: 5, label: 'Extra sub' } } }
+  await clock.advance(WATCH_EVERY_MS)
+  expect(await ui.find({ type: 'Box', key: 'card-extra' })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /Extra sub/ })).toBeTruthy()
+  expect((await ui.find({ type: 'Box', key: 'track-extra-7' }))?.props.width).toBe('50%')
+  await ui.unmount()
+})
+
+test('/limits reads the file again at once', async ($, on) => {
+  const w: World = { limits: FILE }
+  const { ui } = await boot($, on, w)
+  w.limits = { ...FILE, side: { ...SIDE, seven: 60, at: now + 1000 } }
+  await $.command.run({ command: 'limits', args: '' })
+  await new Promise(r => setTimeout(r, 50))
+  expect(await hasText(ui, left(60))).toBe(true)
+  await ui.unmount()
+})
+
+for (const [what, age, stale] of [['just inside', LIMITS_FRESH_MS - 60_000, false], ['just past', LIMITS_FRESH_MS + 60_000, true]] as const) {
+  test(`numbers checked ${what} the freshness limit are ${stale ? 'marked as not live' : 'drawn as live'}, and the numbers stay`, async ($, on) => {
+    const { ui } = await boot($, on, { limits: { default: WORK, side: { ...SIDE, at: Date.now() - age } } })
+    expect(!!(await ui.find({ key: 'stale-side' }))).toBe(stale)
+    expect(await ui.find({ key: 'stale-default' })).toBeFalsy()
+    expect(await hasText(ui, left(SIDE.seven))).toBe(true)
+    await ui.unmount()
+  })
+}
+
+test('when demo.json goes away the file is shown again even though its text did not change', async ($, on) => {
+  const demo = { account: 'default', accounts: { default: { label: 'Work' }, side: { label: 'Side' } }, mine: [], others: { side: { label: 'Side', five: null, seven: 22, sevenInHours: 100 } } }
+  const w: World = { limits: FILE }
+  const { ui, clock } = await boot($, on, w)
+  expect(await hasText(ui, left(SIDE.seven))).toBe(true)
+  await clock.advance(WATCH_EVERY_MS) // the first tick only remembers accounts.json
+  w.demo = demo
+  w.accounts = { accounts: { default: { label: 'Work' }, side: { label: 'Side' } } }
+  await clock.advance(WATCH_EVERY_MS)
+  expect(await hasText(ui, left(22))).toBe(true)
+  expect(await hasText(ui, left(SIDE.seven))).toBe(false)
+  w.demo = undefined
+  w.accounts = { accounts: { default: { label: 'Work' }, side: { label: 'Side' }, other: {} } }
+  await clock.advance(WATCH_EVERY_MS)
+  expect(await hasText(ui, left(SIDE.seven))).toBe(true)
+  expect(await hasText(ui, left(22))).toBe(false)
   await ui.unmount()
 })

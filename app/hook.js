@@ -26,11 +26,24 @@ function log(msg) {
   } catch {}
 }
 
-let refreshing, lastRefresh = 0;
+let refreshing, lastRefresh = 0, refreshAgain = false;
 function refresh() {
-  if (refreshing) return;
+  if (refreshing) { refreshAgain = true; return; }
   lastRefresh = Date.now();
-  refreshing = logic().refreshLimits(state).catch((e) => log(`limits: ${e.message}`)).finally(() => { refreshing = undefined; });
+  refreshing = logic().refreshLimits(state).catch((e) => log(`limits: ${e.message}`)).finally(() => {
+    refreshing = undefined;
+    if (refreshAgain) { refreshAgain = false; refresh(); }
+  });
+}
+
+// A subscription added (or removed) in accounts.json gets its numbers at once, not at the next 10-minute round.
+const ACCOUNTS = path.join(HOME, "accounts.json");
+let accountsMtime;
+function watchAccounts() {
+  let m;
+  try { m = fs.statSync(ACCOUNTS).mtimeMs; } catch { m = undefined; }
+  if (accountsMtime !== undefined && m !== undefined && m !== accountsMtime) refresh();
+  accountsMtime = m;
 }
 
 // Called right after the session env is built. Returns nothing; mutates env.
@@ -84,6 +97,7 @@ async function restartPending() {
 setTimeout(refresh, 5000);
 setInterval(refresh, REFRESH_MS).unref?.();
 setInterval(() => void restartPending(), 1000).unref?.();
+setInterval(watchAccounts, 1000).unref?.();
 
 // Optional page tweaks of the user's own: HOME/inject.js runs in every page of the app on
 // load and again whenever the file is saved.

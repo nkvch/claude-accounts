@@ -14,7 +14,9 @@ const ACCOUNTS = () => `${where.home}/accounts.json`
 const ADD_PY = () => `${where.app}/add_subscription.py`
 // The one shared source of the numbers: the app's main process probes every subscription and writes this file.
 const LIMITS = () => `${where.home}/state/limits.json`
-const WATCH_EVERY_MS = 20 * 1000
+export const WATCH_EVERY_MS = 20 * 1000
+// Numbers older than this are shown as not live. Same value as LIMITS_FRESH_MS in app/logic.js, which the plugin cannot import.
+export const LIMITS_FRESH_MS = 30 * 60 * 1000
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 // The empty part of a bar: a faint grey that reads on a light and a dark theme alike.
 const TRACK = '#8080802e'
@@ -119,6 +121,12 @@ async function loadConfig($: EngineInterface) {
   try {
     if (!where.app) return
     const d = await readDemo($)
+    if (demo && !d) {
+      // Leaving demo mode: forget the made-up numbers and the file text, so the file is read again even if it did not change.
+      await update($, limits, () => ({}))
+      await update($, limitsText, () => '')
+      await update($, checkedAt, () => 0)
+    }
     demo = !!d
     const at = (h?: number) => (h == null ? null : Date.now() + h * 3600 * 1000)
     if (d) {
@@ -339,16 +347,18 @@ export const register: Register = on => {
       const p = probes[name]
       const key = name === acct ? 'mine' : name
       if (!p) return <Text size="footnote" dimColor>{none}</Text>
-      if (p.error) return <Text size="footnote" dimColor>{`Couldn't check: ${p.error}`}</Text>
+      if (p.error) return <Box key={`error-${name}`}><Text size="footnote" dimColor>{`Couldn't check: ${p.error}`}</Text></Box>
       if (p.five == null && p.seven == null) return <Text size="footnote" dimColor>No usage numbers from this plan</Text>
+      const stale = typeof p.at === 'number' && now - p.at > LIMITS_FRESH_MS
       return (
         <Box flexDirection="column" gap="sm">
+          {stale && <Box key={`stale-${name}`}><Text size="footnote" color="warning">{`Not live, last checked ${when(p.at!)}`}</Text></Box>}
           {p.five != null && meter(`${key}-5`, '5 hours', p.five, p.fiveReset, barOf(name), WINDOW_MS.five)}
           {p.seven != null && meter(`${key}-7`, 'Week', p.seven, p.sevenReset, barOf(name), WINDOW_MS.seven)}
         </Box>
       )
     }
-    const rest = Object.keys(probes).filter(name => name !== acct && name in names)
+    const rest = Object.keys(names).filter(name => name !== acct)
     const hasRest = rest.length > 0 || acct !== 'default'
 
     return (
@@ -373,9 +383,7 @@ export const register: Register = on => {
         <Box flexDirection="column" gap="md">
           {card(acct, numbers(acct, 'Not checked yet.'))}
           {hasRest && <Text size="footnote" dimColor>Other subscriptions</Text>}
-          {hasRest && rest.map(name => card(name, numbers(name, '')))}
-          {acct !== 'default' && !probes.default && names.default !== undefined &&
-            card('default', <Text size="footnote" dimColor>No fresh numbers yet</Text>)}
+          {hasRest && rest.map(name => card(name, numbers(name, 'No fresh numbers yet')))}
         </Box>
 
         {rest.length === 0 && acct === 'default' && <Text size="footnote" dimColor>Checking…</Text>}

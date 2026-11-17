@@ -1,12 +1,13 @@
-export type Window = { kind: string; percentUsed: number; resetsAt?: string }
-
+// One entry of state/limits.json, written by the app's main process.
 export type Probe = {
-  label: string
   five?: number | null
   seven?: number | null
   fiveReset?: number | null
   sevenReset?: number | null
   error?: string
+  unknown?: boolean
+  status?: string
+  at?: number
 }
 
 declare module 'claude-code' {
@@ -14,8 +15,8 @@ declare module 'claude-code' {
     subscriptions: {
       account: string
       picked: string
-      mine: Window[]
-      others: Record<string, Probe>
+      limits: Record<string, Probe>
+      limitsText: string
       checkedAt: number
       sizes: Record<string, number>
       labels: Record<string, string>

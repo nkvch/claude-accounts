@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Probe, Window } from '../types'
+import type { Probe } from '../types'
 
 // The patched app (claude-accounts) tells every session where its code and config are
 // (CLAUDE_ACCOUNTS_APP / CLAUDE_ACCOUNTS_HOME) and which subscription it runs on (CC_ACCOUNT;
@@ -12,8 +12,8 @@ const where = { app: '', home: '' }
 const ACCT = () => `${where.app}/acct`
 const ACCOUNTS = () => `${where.home}/accounts.json`
 const ADD_PY = () => `${where.app}/add_subscription.py`
-const LIMITS_PY = () => `${where.app}/limits.py`
-const PROBE_EVERY_MS = 10 * 60 * 1000
+// The one shared source of the numbers: the app's main process probes every subscription and writes this file.
+const LIMITS = () => `${where.home}/state/limits.json`
 const WATCH_EVERY_MS = 20 * 1000
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 // The empty part of a bar: a faint grey that reads on a light and a dark theme alike.
@@ -31,8 +31,9 @@ const pace = (left: number, timeLeft: number) =>
 const account = atom({ plugin: 'subscriptions', key: 'account' } as const, 'default')
 // The last pick in the dropdown: the chat runs on `account` until its process restarts.
 const picked = atom({ plugin: 'subscriptions', key: 'picked' } as const, 'default')
-const mine = atom({ plugin: 'subscriptions', key: 'mine' } as const, [])
-const others = atom({ plugin: 'subscriptions', key: 'others' } as const, {})
+// state/limits.json as last read (by account name), and its text, to see whether the file changed.
+const limits = atom({ plugin: 'subscriptions', key: 'limits' } as const, {})
+const limitsText = atom({ plugin: 'subscriptions', key: 'limitsText' } as const, '')
 const checkedAt = atom({ plugin: 'subscriptions', key: 'checkedAt' } as const, 0)
 // Each plan's size in "times Pro usage per week" (accounts.json `proX`): bars are drawn to scale and it is shown as text next to the name.
 const sizes = atom({ plugin: 'subscriptions', key: 'sizes' } as const, {})
@@ -54,20 +55,20 @@ const when = (ms: number) => {
   const d = new Date(ms)
   return d.toDateString() === new Date().toDateString() ? hm(d) : `${DAYS[d.getDay()]} ${hm(d)}`
 }
-const isoMs = (iso?: string) => (iso ? Date.parse(iso) : null)
 
-// The accounts list as last read: when it changes (a subscription added), probe at once
-// instead of waiting for the 10-minute round.
+// The accounts list as last read: when it changes (a subscription added), read the config and the
+// numbers again at once instead of waiting for the next tick.
 let seenAccounts = ''
 async function watchAccounts($: EngineInterface) {
   try {
     const text = await $.fs.read(ACCOUNTS())
     if (seenAccounts && text !== seenAccounts) {
-      void probe($)
+      void load($)
       void readAuto($)
     }
     seenAccounts = text
   } catch {}
+  await readLimits($)
 }
 
 // Screenshot mode: HOME/demo.json replaces every number and name with made-up ones (see
@@ -114,7 +115,7 @@ async function readAuto($: EngineInterface): Promise<string | null> {
   }
 }
 
-async function probe($: EngineInterface) {
+async function loadConfig($: EngineInterface) {
   try {
     if (!where.app) return
     const d = await readDemo($)
@@ -123,9 +124,19 @@ async function probe($: EngineInterface) {
     if (d) {
       await update($, account, () => d.account)
       await update($, picked, () => d.account)
-      await update($, mine, () => d.mine.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: new Date(at(w.resetsInHours)!).toISOString() })))
-      await update($, others, () => Object.fromEntries(Object.entries(d.others).map(([k, o]) =>
-        [k, { label: o.label, five: o.five, seven: o.seven, fiveReset: at(o.fiveInHours), sevenReset: at(o.sevenInHours) }])))
+      const win = (kind: string) => d.mine.find(w => w.kind === kind)
+      const mineNow: Record<string, Probe> = d.mine.length === 0 ? {} : {
+        [d.account]: {
+          five: win('five_hour')?.percentUsed ?? null, seven: win('seven_day')?.percentUsed ?? null,
+          fiveReset: at(win('five_hour')?.resetsInHours), sevenReset: at(win('seven_day')?.resetsInHours),
+        },
+      }
+      await update($, limits, () => ({
+        ...mineNow,
+        ...Object.fromEntries(Object.entries(d.others).map(([k, o]) =>
+          [k, { five: o.five, seven: o.seven, fiveReset: at(o.fiveInHours), sevenReset: at(o.sevenInHours) }])),
+      }))
+      await update($, checkedAt, () => Date.now())
     }
     const cfg = d ?? JSON.parse(await $.fs.read(ACCOUNTS())) as { barScale?: unknown; accounts: Record<string, { proX?: number; plan?: string; label?: string; note?: string }> }
     const each = <T,>(f: (k: string, a: { proX?: number; plan?: string; label?: string; note?: string }) => T) =>
@@ -135,14 +146,36 @@ async function probe($: EngineInterface) {
     await update($, plans, () => Object.fromEntries(Object.entries(cfg.accounts).flatMap(([k, a]) => (a.plan ? [[k, a.plan]] : []))))
     await update($, labels, () => each((k, a) => a.label ?? (k === 'default' ? 'Desktop login' : k)))
     await update($, notes, () => each((_, a) => a.note ?? ''))
-    if (!d) {
-      const { exitCode, stdout } = await $.process.run(['/usr/bin/python3', LIMITS_PY()], { timeoutMs: 60000 })
-      if (exitCode === 0) await update($, others, () => JSON.parse(stdout) as Record<string, Probe>)
-    }
-    await update($, checkedAt, () => Date.now())
   } catch (err) {
-    $.ui.log(`subscriptions: probe failed: ${String(err)}`, { to: 'debug' })
+    $.ui.log(`subscriptions: reading the config failed: ${String(err)}`, { to: 'debug' })
   }
+}
+
+// Every chat shows the same numbers because they all come from state/limits.json, which the app's main
+// process refreshes for all subscriptions (logic.js refreshLimits). Atoms change only when the text did.
+async function readLimits($: EngineInterface) {
+  try {
+    if (!where.app || demo) return
+    const text = await $.fs.read(LIMITS())
+    if (typeof text !== 'string') {
+      $.ui.log('subscriptions: limits.json is not there yet', { to: 'debug' })
+      return
+    }
+    if (text === (await read($, limitsText))) return
+    const parsed: unknown = JSON.parse(text)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
+    const file = parsed as Record<string, Probe>
+    await update($, limits, () => file)
+    await update($, checkedAt, () => Math.max(0, ...Object.values(file).map(p => (typeof p?.at === 'number' ? p.at : 0))))
+    await update($, limitsText, () => text)
+  } catch (err) {
+    $.ui.log(`subscriptions: limits.json not read: ${String(err)}`, { to: 'debug' })
+  }
+}
+
+async function load($: EngineInterface) {
+  await loadConfig($)
+  await readLimits($)
 }
 
 export const register: Register = on => {
@@ -155,19 +188,16 @@ export const register: Register = on => {
     const acct = (await $.env.get('CC_ACCOUNT')) ?? 'default'
     await update($, account, () => acct)
     await update($, picked, () => acct)
-    const usage = await $.session.usage()
-    await update($, mine, () => usage.rateLimits)
     void $.ui.open({ id: PANE, title: TITLE })
-    void probe($)
+    void load($)
     void readAuto($)
-    $.clock.every(PROBE_EVERY_MS, () => void probe($))
     $.clock.every(WATCH_EVERY_MS, () => void watchAccounts($))
     return started
   })
 
   on('command.run', { command: 'limits' }, async $ => {
     await $.ui.open({ id: PANE, title: TITLE })
-    void probe($)
+    void load($)
     return { text: 'Subscriptions pane opened.' }
   })
 
@@ -176,11 +206,6 @@ export const register: Register = on => {
     const args = e.args.trim() ? [e.args.trim()] : []
     const { stdout, stderr } = await $.process.run([ACCT(), ...args], { timeoutMs: 15000 })
     return { text: (stdout || stderr).trim() }
-  })
-
-  on('session.measure', async ($, e, next) => {
-    if (!demo) await update($, mine, () => e.rateLimits)
-    return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -192,8 +217,7 @@ export const register: Register = on => {
     }
     const acct = await read($, account)
     const shown = await read($, picked)
-    const limits = await read($, mine)
-    const probes = await read($, others)
+    const probes = await read($, limits)
     const checked = await read($, checkedAt)
     const scale = await read($, sizes)
     const independent = (await read($, barScale)) === 'independent'
@@ -310,9 +334,21 @@ export const register: Register = on => {
     }
     const choices = [...new Set([...Object.keys(names), acct, shown])].sort((a, b) => Number(b === 'default') - Number(a === 'default'))
 
-    const five = limits.find(l => l.kind === 'five_hour')
-    const seven = limits.find(l => l.kind === 'seven_day')
-    const rest = Object.entries(probes).filter(([name]) => name !== acct)
+    // The same card body for this chat's subscription and the others; `key` keeps this chat's meters under "mine".
+    const numbers = (name: string, none: string) => {
+      const p = probes[name]
+      const key = name === acct ? 'mine' : name
+      if (!p) return <Text size="footnote" dimColor>{none}</Text>
+      if (p.error) return <Text size="footnote" dimColor>{`Couldn't check: ${p.error}`}</Text>
+      if (p.five == null && p.seven == null) return <Text size="footnote" dimColor>No usage numbers from this plan</Text>
+      return (
+        <Box flexDirection="column" gap="sm">
+          {p.five != null && meter(`${key}-5`, '5 hours', p.five, p.fiveReset, barOf(name), WINDOW_MS.five)}
+          {p.seven != null && meter(`${key}-7`, 'Week', p.seven, p.sevenReset, barOf(name), WINDOW_MS.seven)}
+        </Box>
+      )
+    }
+    const rest = Object.keys(probes).filter(name => name !== acct && name in names)
     const hasRest = rest.length > 0 || acct !== 'default'
 
     return (
@@ -335,19 +371,9 @@ export const register: Register = on => {
         </Box>
 
         <Box flexDirection="column" gap="md">
-          {card(acct, five || seven
-            ? <Box flexDirection="column" gap="sm">
-                {five && meter('mine-5', '5 hours', five.percentUsed, isoMs(five.resetsAt), barOf(acct), WINDOW_MS.five)}
-                {seven && meter('mine-7', 'Week', seven.percentUsed, isoMs(seven.resetsAt), barOf(acct), WINDOW_MS.seven)}
-              </Box>
-            : <Text size="footnote" dimColor>Numbers appear after the first reply.</Text>)}
+          {card(acct, numbers(acct, 'Not checked yet.'))}
           {hasRest && <Text size="footnote" dimColor>Other subscriptions</Text>}
-          {hasRest && rest.map(([name, p]) => card(name, p.error
-            ? <Text size="footnote" dimColor>{`Couldn't check: ${p.error}`}</Text>
-            : <Box flexDirection="column" gap="sm">
-                {p.five != null && meter(`${name}-5`, '5 hours', p.five, p.fiveReset, barOf(name), WINDOW_MS.five)}
-                {meter(`${name}-7`, 'Week', p.seven, p.sevenReset, barOf(name), WINDOW_MS.seven)}
-              </Box>))}
+          {hasRest && rest.map(name => card(name, numbers(name, '')))}
           {acct !== 'default' && !probes.default && names.default !== undefined &&
             card('default', <Text size="footnote" dimColor>No fresh numbers yet</Text>)}
         </Box>

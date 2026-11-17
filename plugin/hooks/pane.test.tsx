@@ -6,9 +6,10 @@ const PANE = {
 } as const
 
 const now = Date.now()
+// state/limits.json as the app's main process writes it: one entry per account, `at` = when it was checked.
 const PROBES = {
-  personal: { label: 'Personal', five: null, seven: 10, fiveReset: null, sevenReset: now + 3 * 864e5 },
-  side: { label: 'Side project', five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 },
+  personal: { five: null, seven: 10, fiveReset: null, sevenReset: now + 3 * 864e5, status: 'allowed', at: now },
+  side: { five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5, status: 'allowed', at: now },
 }
 const ACCOUNTS = { accounts: { default: { proX: 6.25, label: 'Work' }, personal: { proX: 10, plan: 'Ultra', label: 'Personal' }, side: { proX: 5, label: 'Side project', note: 'used by the bot' } } }
 const ENV: Record<string, string> = { CLAUDE_ACCOUNTS_APP: '/opt/ca/app', CLAUDE_ACCOUNTS_HOME: '/home/.claude-accounts' }
@@ -19,12 +20,12 @@ test('each subscription shows what is left and the dropdown moves the chat onto 
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('env.get', (_, e) => ({ value: ENV[e.name] }))
-  on('session.usage', () => ({ value: { rateLimits: [{ kind: 'five_hour', percentUsed: 29, resetsAt: new Date(now + 36e5).toISOString() }, { kind: 'seven_day', percentUsed: 7, resetsAt: new Date(now + 6 * 864e5).toISOString() }] } }))
-  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(ACCOUNTS) : undefined }))
+  const file = { ...PROBES, default: { five: 29, seven: 7, fiveReset: now + 36e5, sevenReset: now + 6 * 864e5, status: 'allowed', at: now } }
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(ACCOUNTS) : e.path.endsWith('state/limits.json') ? JSON.stringify(file) : undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('process.run', (_, e) => {
     runs.push([...e.argv])
-    return { value: { exitCode: 0, stdout: e.argv[0] === '/usr/bin/python3' ? JSON.stringify(PROBES) : 'this session -> personal (Personal)', stderr: '' } }
+    return { value: { exitCode: 0, stdout: 'this session -> personal (Personal)', stderr: '' } }
   })
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await new Promise(r => setTimeout(r, 50))
@@ -74,9 +75,8 @@ test('a demo.json in the config folder replaces every name and number', async ($
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('env.get', (_, e) => ({ value: ENV[e.name] }))
-  on('session.usage', () => ({ value: { rateLimits: [] } }))
-  on('fs.read', (_, e) => ({ value: e.path.endsWith('demo.json') ? JSON.stringify(DEMO) : JSON.stringify(ACCOUNTS) }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify(PROBES), stderr: '' } }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('demo.json') ? JSON.stringify(DEMO) : e.path.endsWith('limits.json') ? JSON.stringify({ ...PROBES, work: { five: null, seven: 99, fiveReset: null, sevenReset: now + 864e5, at: now } }) : JSON.stringify(ACCOUNTS) }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await new Promise(r => setTimeout(r, 50))
 
@@ -90,16 +90,16 @@ test('a demo.json in the config folder replaces every name and number', async ($
 test('each bar is drawn to its plan size: twice the plan, twice the width, the biggest fills the track', async ($, on) => {
   const accounts = { accounts: { default: { proX: 10, label: 'Big' }, side: { proX: 5, label: 'Side' }, tiny: { proX: 0.1, label: 'Tiny' } } }
   const probes = {
-    side: { label: 'Side', five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 },
-    tiny: { label: 'Tiny', five: 5, seven: 5, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 },
+    default: { five: null, seven: 7, fiveReset: null, sevenReset: now + 6 * 864e5, at: now },
+    side: { five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5, at: now },
+    tiny: { five: 5, seven: 5, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5, at: now },
   }
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('env.get', (_, e) => ({ value: ENV[e.name] }))
-  on('session.usage', () => ({ value: { rateLimits: [{ kind: 'seven_day', percentUsed: 7, resetsAt: new Date(now + 6 * 864e5).toISOString() }] } }))
-  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(accounts) : undefined }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: JSON.stringify(probes), stderr: '' } }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(accounts) : e.path.endsWith('limits.json') ? JSON.stringify(probes) : undefined }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await new Promise(r => setTimeout(r, 50))
 
@@ -120,12 +120,10 @@ test('the pane shows what `acct auto` reports and the switch runs the opposite c
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('env.get', (_, e) => ({ value: ENV[e.name] }))
-  on('session.usage', () => ({ value: { rateLimits: [] } }))
   on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(ACCOUNTS) : undefined }))
   on('ui.toast', () => ({ value: undefined }))
   on('process.run', (_, e) => {
     runs.push([...e.argv])
-    if (e.argv[0] === '/usr/bin/python3') return { value: { exitCode: 0, stdout: JSON.stringify(PROBES), stderr: '' } }
     if (failNext && e.argv[2]) return { value: { exitCode: 1, stdout: '', stderr: 'accounts.json is read-only' } }
     if (e.argv[2]) state = e.argv[2]
     return { value: { exitCode: 0, stdout: `${state}\n`, stderr: '' } }
@@ -152,12 +150,12 @@ type Run = { exitCode: number; stdout: string; stderr: string }
 type World = {
   env?: Record<string, string>
   accounts?: unknown
-  probes?: unknown
-  limits?: { kind: string; percentUsed: number; resetsAt: string }[]
+  // the content of state/limits.json: an object, a string (verbatim, e.g. broken JSON) or undefined (no file)
+  limits?: unknown
   acct?: (argv: string[]) => Run | Promise<Run>
 }
 const OK = (stdout: string): Run => ({ exitCode: 0, stdout, stderr: '' })
-const SEVEN = (percentUsed: number, days = 3.5) => [{ kind: 'seven_day', percentUsed, resetsAt: new Date(now + days * 864e5).toISOString() }]
+const SEVEN = (seven: number, days = 3.5) => ({ five: null, seven, fiveReset: null, sevenReset: now + days * 864e5, at: now })
 
 // Mounts the pane with scripted file and process answers; `w` is read on every call, so a test can change it between steps.
 async function boot($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<Parameters<typeof test>[1]>[1], w: World) {
@@ -167,26 +165,31 @@ async function boot($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('env.get', (_, e) => ({ value: { ...ENV, ...w.env }[e.name] }))
-  on('session.usage', () => ({ value: { rateLimits: w.limits ?? [] } }))
-  on('fs.read', (_, e) => ({ value: e.path.endsWith('accounts.json') ? JSON.stringify(w.accounts ?? ACCOUNTS) : undefined }))
-  on('ui.log', () => ({ value: undefined }))
+  const read = (path: string) => {
+    if (path.endsWith('accounts.json')) return JSON.stringify(w.accounts ?? ACCOUNTS)
+    if (path.endsWith('state/limits.json') && 'limits' in w) return typeof w.limits === 'string' || w.limits === undefined ? w.limits : JSON.stringify(w.limits)
+    if (path.endsWith('state/limits.json')) return JSON.stringify(PROBES)
+    return undefined
+  }
+  const logs: string[] = []
+  on('fs.read', (_, e) => ({ value: read(e.path) }))
+  on('ui.log', (_, e) => { logs.push(e.text); return { value: undefined } })
   on('ui.toast', (_, e) => { toasts.push(e.text); return { value: undefined } })
   on('process.run', async (_, e) => {
     runs.push([...e.argv])
-    if (e.argv[0] === '/usr/bin/python3') return { value: OK(JSON.stringify(w.probes ?? PROBES)) }
     return { value: w.acct ? await w.acct(e.argv) : OK('this session -> x') }
   })
   const clock = mock.clock(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  return { ui, runs, toasts, clock }
+  return { ui, runs, toasts, clock, logs }
 }
 
 test('a plan is drawn in proportion, not floored; one below the minimum share is drawn at exactly the minimum', async ($, on) => {
   const accounts = { accounts: { default: { proX: 20, label: 'Big' }, one: { proX: 1, label: 'One' }, speck: { proX: 0.2, label: 'Speck' } } }
-  const p = (label: string) => ({ label, five: null, seven: 5, fiveReset: null, sevenReset: now + 3 * 864e5 })
-  const { ui } = await boot($, on, { accounts, probes: { one: p('One'), speck: p('Speck') }, limits: SEVEN(7) })
+  const p = (_label: string) => ({ five: null, seven: 5, fiveReset: null, sevenReset: now + 3 * 864e5, at: now })
+  const { ui } = await boot($, on, { accounts, limits: { default: SEVEN(7), one: p('One'), speck: p('Speck') } })
   const width = async (key: string) => (await ui.find({ type: 'Box', key }))?.props.width
   expect(await width('track-mine-7')).toBe('100%')
   expect(await width('track-one-7')).toBe('5%')
@@ -196,8 +199,8 @@ test('a plan is drawn in proportion, not floored; one below the minimum share is
 
 test('a bar without a usable size is full width and never poisons the others', async ($, on) => {
   const accounts = { accounts: { default: { proX: 10, label: 'Big' }, none: { label: 'None' }, junk: { proX: 'big', label: 'Junk' }, zero: { proX: 0, label: 'Zero' } } }
-  const p = (label: string) => ({ label, five: null, seven: 5, fiveReset: null, sevenReset: now + 3 * 864e5 })
-  const { ui } = await boot($, on, { accounts, probes: { none: p('None'), junk: p('Junk'), zero: p('Zero') }, limits: SEVEN(7) })
+  const p = (_label: string) => ({ five: null, seven: 5, fiveReset: null, sevenReset: now + 3 * 864e5, at: now })
+  const { ui } = await boot($, on, { accounts, limits: { default: SEVEN(7), none: p('None'), junk: p('Junk'), zero: p('Zero') } })
   const width = async (key: string) => (await ui.find({ type: 'Box', key }))?.props.width
   expect(await width('track-mine-7')).toBe('100%')
   expect(await width('track-none-7')).toBe('100%')
@@ -208,14 +211,14 @@ test('a bar without a usable size is full width and never poisons the others', a
 
 test('the current account is drawn to its own plan size too', async ($, on) => {
   const accounts = (small: object) => ({ accounts: { default: { proX: 10, label: 'Big' }, side: { label: 'Side', ...small } } })
-  const half = await boot($, on, { env: { CC_ACCOUNT: 'side' }, accounts: accounts({ proX: 5 }), probes: {}, limits: SEVEN(7) })
+  const half = await boot($, on, { env: { CC_ACCOUNT: 'side' }, accounts: accounts({ proX: 5 }), limits: { side: SEVEN(7) } })
   expect((await half.ui.find({ type: 'Box', key: 'track-mine-7' }))?.props.width).toBe('50%')
   await half.ui.unmount()
 })
 
 test('the current account without a size gets the full width', async ($, on) => {
   const accounts = { accounts: { default: { proX: 10, label: 'Big' }, side: { label: 'Side' } } }
-  const { ui } = await boot($, on, { env: { CC_ACCOUNT: 'side' }, accounts, probes: {}, limits: SEVEN(7) })
+  const { ui } = await boot($, on, { env: { CC_ACCOUNT: 'side' }, accounts, limits: { side: SEVEN(7) } })
   expect((await ui.find({ type: 'Box', key: 'track-mine-7' }))?.props.width).toBe('100%')
   await ui.unmount()
 })
@@ -223,7 +226,7 @@ test('the current account without a size gets the full width', async ($, on) => 
 // Half of the week is left, so an even spend leaves 50%; amber starts at 70% of that.
 for (const [used, colour] of [[49, 'success'], [51, 'warning'], [64, 'warning'], [66, 'error']] as const) {
   test(`the fill colour at ${100 - used}% left of the week with half of it to go is ${colour}`, async ($, on) => {
-    const { ui } = await boot($, on, { limits: SEVEN(used) })
+    const { ui } = await boot($, on, { limits: { default: SEVEN(used) } })
     expect((await ui.find({ type: 'Box', key: 'a' }))?.props.backgroundColor).toBe(colour)
     await ui.unmount()
   })
@@ -282,7 +285,7 @@ test('a failed press with no output at all still says which command failed and h
 })
 
 test('the dropdown always lists the current and the picked account, even when accounts.json does not name them', async ($, on) => {
-  const w: World = { env: { CC_ACCOUNT: 'ghost' }, accounts: { accounts: { default: { label: 'Work' }, personal: { label: 'Personal' } } }, probes: {}, acct: () => OK('this session -> personal') }
+  const w: World = { env: { CC_ACCOUNT: 'ghost' }, accounts: { accounts: { default: { label: 'Work' }, personal: { label: 'Personal' } } }, limits: {}, acct: () => OK('this session -> personal') }
   const { ui, clock } = await boot($, on, w)
   const values = async () => ((await ui.find({ type: 'Select', key: 'account' }))?.props.options as { value: string }[]).map(o => o.value).sort()
   expect(await values()).toEqual(['default', 'ghost', 'personal'])
@@ -311,7 +314,7 @@ test('a failed `acct <name>` toasts the error and leaves the pick where it was',
 })
 
 test('a chat on a non-default account lists the other subscriptions even before any probe came back', async ($, on) => {
-  const { ui } = await boot($, on, { env: { CC_ACCOUNT: 'personal' }, probes: {} })
+  const { ui } = await boot($, on, { env: { CC_ACCOUNT: 'personal' }, limits: {} })
   expect(await ui.find({ type: 'Text', text: /Other subscriptions/ })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /No fresh numbers yet/ })).toBeTruthy()
   await ui.unmount()
@@ -406,8 +409,8 @@ test('a retry that works toasts nothing', async ($, on) => {
 for (const [mode, expected] of [['independent', '100%'], ['adaptive', '50%'], ['nonsense', '50%']] as const) {
   test(`barScale "${mode}" draws the smaller plan's bar ${expected} wide`, async ($, on) => {
     const accounts = { barScale: mode, accounts: { default: { proX: 10, label: 'Big' }, side: { proX: 5, label: 'Side' } } }
-    const probes = { side: { label: 'Side', five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 } }
-    const { ui } = await boot($, on, { accounts, probes })
+    const limits = { side: { five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5, at: now } }
+    const { ui } = await boot($, on, { accounts, limits })
     expect((await ui.find({ type: 'Box', key: 'track-side-7' }))?.props.width).toBe(expected)
     await ui.unmount()
   })
@@ -415,10 +418,10 @@ for (const [mode, expected] of [['independent', '100%'], ['adaptive', '50%'], ['
 
 test('the Bar width button flips between plan size and full width through acct scale, and shows a failure', async ($, on) => {
   const accounts = { accounts: { default: { proX: 10, label: 'Big' }, side: { proX: 5, label: 'Side' } } }
-  const probes = { side: { label: 'Side', five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5 } }
+  const limits = { side: { five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5, at: now } }
   let fail = false
   const { ui, runs, toasts } = await boot($, on, {
-    accounts, probes,
+    accounts, limits,
     acct: async argv => (fail ? { exitCode: 1, stdout: '', stderr: 'cannot write accounts.json' } : OK(argv[2] ?? '')),
   })
   const width = async () => (await ui.find({ type: 'Box', key: 'track-side-7' }))?.props.width
@@ -445,5 +448,112 @@ test('the dropdown stands alone, without a "Switch to" label', async ($, on) => 
   const { ui } = await boot($, on, {})
   expect(await ui.find({ type: 'Select', key: 'account' })).toBeTruthy()
   expect(await ui.find({ type: 'Text', text: /^Switch to$/ })).toBeFalsy()
+  await ui.unmount()
+})
+
+// ---- one shared source: state/limits.json, read by every chat ----
+
+const SIDE = { five: 17, seven: 33, fiveReset: now + 2 * 36e5, sevenReset: now + 5 * 864e5, at: now }
+const WORK = { five: 29, seven: 7, fiveReset: now + 36e5, sevenReset: now + 6 * 864e5, at: now }
+const FILE = { default: WORK, personal: PROBES.personal, side: SIDE }
+const hasText = async (ui: Awaited<ReturnType<typeof boot>>['ui'], text: string) => !!(await ui.find({ type: 'Text', text: new RegExp(`^${text}$`) }))
+const left = (used: number) => `${100 - used}%`
+
+for (const chat of ['default', 'side'] as const) {
+  test(`a chat on "${chat}" draws every subscription, its own included, from the file`, async ($, on) => {
+    const { ui } = await boot($, on, { env: { CC_ACCOUNT: chat }, limits: FILE })
+    // 5-hour and weekly numbers of work, side and personal as the file has them; they are distinct, so each must come from its own entry
+    for (const text of [left(WORK.five), left(WORK.seven), left(SIDE.five), left(SIDE.seven), left(PROBES.personal.seven)]) {
+      expect(await hasText(ui, text)).toBe(true)
+    }
+    await ui.unmount()
+  })
+}
+
+test('what this chat itself last measured does not reach the bars', async ($, on) => {
+  on('session.usage', () => ({ value: { rateLimits: [{ kind: 'five_hour', percentUsed: 99, resetsAt: new Date(now + 36e5).toISOString() }, { kind: 'seven_day', percentUsed: 98, resetsAt: new Date(now + 864e5).toISOString() }] } }))
+  const { ui } = await boot($, on, { limits: FILE })
+  expect(await hasText(ui, left(WORK.five))).toBe(true)
+  expect(await hasText(ui, left(99))).toBe(false)
+  expect(await hasText(ui, left(98))).toBe(false)
+  await ui.unmount()
+})
+
+test('a chat never probes the limits itself: no process is run to get the numbers', async ($, on) => {
+  const w: World = { limits: FILE }
+  const { ui, runs, clock } = await boot($, on, w)
+  await clock.advance(11 * 60 * 1000)
+  expect(runs.filter(a => a[0] === '/usr/bin/python3' || a.some(x => x.endsWith('limits.py')))).toEqual([])
+  await ui.unmount()
+})
+
+test('a file the app rewrote is picked up on the next tick, and not before', async ($, on) => {
+  const w: World = { limits: { ...FILE } }
+  const { ui, clock } = await boot($, on, w)
+  expect(await hasText(ui, left(SIDE.seven))).toBe(true)
+  w.limits = { ...FILE, side: { ...SIDE, seven: 60, at: now + 1000 } }
+  expect(await hasText(ui, left(60))).toBe(false)
+  await clock.advance(20 * 1000)
+  expect(await hasText(ui, left(60))).toBe(true)
+  expect(await hasText(ui, left(SIDE.seven))).toBe(false)
+  await ui.unmount()
+})
+
+test('a new subscription whose numbers the app has written shows up on the next tick', async ($, on) => {
+  const w: World = { limits: { default: WORK } }
+  const { ui, clock } = await boot($, on, w)
+  expect(await hasText(ui, left(SIDE.seven))).toBe(false)
+  w.accounts = ACCOUNTS
+  w.limits = FILE
+  await clock.advance(20 * 1000)
+  expect(await hasText(ui, left(SIDE.seven))).toBe(true)
+  await ui.unmount()
+})
+
+for (const [what, limits] of [['missing', undefined], ['not JSON', '{"default": {"five": 1'], ['not an object', '[1, 2]']] as const) {
+  test(`a limits file that is ${what} leaves the pane without numbers, with no times and a reason in the debug log`, async ($, on) => {
+    const { ui, logs } = await boot($, on, { limits })
+    expect(await ui.find({ type: 'Box', key: 'track-mine-7' })).toBeFalsy()
+    expect(await ui.find({ type: 'Text', text: /Checked at/ })).toBeFalsy()
+    expect(logs.some(l => l.includes('limits.json'))).toBe(true)
+    await ui.unmount()
+  })
+}
+
+test('a file that is torn once keeps the last good numbers and is read again on the next tick', async ($, on) => {
+  const w: World = { limits: FILE }
+  const { ui, clock } = await boot($, on, w)
+  w.limits = '{"default": {"five": 1'
+  await clock.advance(20 * 1000)
+  expect(await hasText(ui, left(WORK.seven))).toBe(true)
+  w.limits = { ...FILE, default: { ...WORK, seven: 50, at: now + 1000 } }
+  await clock.advance(20 * 1000)
+  expect(await hasText(ui, left(50))).toBe(true)
+  await ui.unmount()
+})
+
+test('an account the file could not check shows its error, an account with no numbers shows no invented bar', async ($, on) => {
+  const limits = { default: WORK, side: { error: 'org_disabled', at: now }, personal: { unknown: true, status: 'allowed', at: now } }
+  const { ui } = await boot($, on, { limits })
+  expect(await ui.find({ type: 'Text', text: /Couldn't check: org_disabled/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Box', key: 'track-personal-7' })).toBeFalsy()
+  expect(await ui.find({ type: 'Box', key: 'track-side-7' })).toBeFalsy()
+  await ui.unmount()
+})
+
+test('the checked time is the newest `at` in the file', async ($, on) => {
+  const old = new Date(now - 3 * 36e5), fresh = new Date(now - 36e5)
+  const hm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const { ui } = await boot($, on, { limits: { default: { ...WORK, at: old.getTime() }, side: { ...SIDE, at: fresh.getTime() } } })
+  const text = (await ui.find({ type: 'Text', text: /Checked at/ }))?.text ?? ''
+  expect(text).toContain(hm(fresh))
+  expect(text).not.toContain(hm(old))
+  await ui.unmount()
+})
+
+test('an account that is in the file but no longer in accounts.json is not drawn', async ($, on) => {
+  const { ui } = await boot($, on, { limits: { ...FILE, removed: { ...SIDE, seven: 71 } } })
+  expect(await hasText(ui, left(SIDE.seven))).toBe(true)
+  expect(await hasText(ui, left(71))).toBe(false)
   await ui.unmount()
 })

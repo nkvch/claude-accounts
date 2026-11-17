@@ -131,7 +131,7 @@ once or the build fails and touches nothing: it loads `app/hook.js` at startup, 
 choose the token when a Code session's process is spawned (and keeps the desktop's own token out
 of it), exposes the app's quiet session restart, and turns the copy's self-updater off. The copy is
 re-signed ad hoc. `app/logic.js` holds the choosing logic and is reloaded on every call. Usage
-numbers come from the rate-limit headers of a 1-token request per subscription, every 10 minutes.
+numbers come from the rate-limit headers of a 1-token request per subscription, every 10 minutes, made by the app itself and written to `state/limits.json`; each chat's pane reads that one file (re-read every 20 s), so all chats show the same numbers.
 
 Not covered: claude.ai chats, the app's own usage ring (it shows the desktop login), SSH and cloud
 sessions.

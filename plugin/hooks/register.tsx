@@ -291,16 +291,23 @@ export const register: Register = on => {
 
     // One limit as a row: the window, a bar drawn to the plan's size and filled with what is left, the percent left
     // and when it resets; a thin mark stands where an even spend would be now (the share of the window still to go).
+    const resetText = (reset: number | null | undefined) => (reset ? when(reset) : 'not started')
+    // `resetCols`: the width of the reset column, the same for every row of a card, so all its bars start and end alike.
     const meter = (key: string, label: string, pct: number | null | undefined, reset: number | null | undefined,
-      size: number, windowMs: number) => {
+      size: number, windowMs: number, resetCols: number) => {
       const left = 100 - Math.max(0, Math.min(100, Math.round(pct ?? 0)))
       const timeLeft = reset ? Math.max(0, Math.min(100, Math.round(((reset - now) / windowMs) * 100))) : 100
       const fill = pace(left, timeLeft)
       const seg = (k: string, w: number, color: string) => w > 0 && <Box key={k} width={`${w}%`} height={1} backgroundColor={color} />
+      // One row: the window, the percent left right next to it, then the bar over all the width that is left,
+      // and the reset time at its own width, so no fixed columns eat the bar's room.
       return (
         <Box key={key} flexDirection="row" alignItems="center" gap="sm">
-          <Box width={9}>
+          <Box width={5.5}>
             <Text size="footnote" dimColor>{label}</Text>
+          </Box>
+          <Box width={3} justifyContent="flex-end">
+            <Text size="footnote" weight="semibold" tabular>{`${left}%`}</Text>
           </Box>
           <Box flexGrow={1}>
             <Box key={`track-${key}`} flexDirection="row" height={1} width={`${size}%`} backgroundColor={TRACK}>
@@ -309,11 +316,8 @@ export const register: Register = on => {
                 : [seg('a', left, fill), seg('b', timeLeft - left, TRACK), <Box key="m" width="2%" height={1} backgroundColor={MARK} />]}
             </Box>
           </Box>
-          <Box width={5} justifyContent="flex-end">
-            <Text size="footnote" weight="semibold" tabular>{`${left}%`}</Text>
-          </Box>
-          <Box width={12} justifyContent="flex-end">
-            <Text size="footnote" tabular dimColor>{reset ? when(reset) : 'not started'}</Text>
+          <Box width={resetCols} justifyContent="flex-end">
+            <Text size="caption" tabular dimColor>{resetText(reset)}</Text>
           </Box>
         </Box>
       )
@@ -350,11 +354,14 @@ export const register: Register = on => {
       if (p.error) return <Box key={`error-${name}`}><Text size="footnote" dimColor>{`Couldn't check: ${p.error}`}</Text></Box>
       if (p.five == null && p.seven == null) return <Text size="footnote" dimColor>No usage numbers from this plan</Text>
       const stale = typeof p.at === 'number' && now - p.at > LIMITS_FRESH_MS
+      // A layout cell is wider than a character in this font, so the column takes 0.75 of the longest text, not rounded. The reset time is in the smaller `caption` size.
+      const resetCols = (0.75 * Math.max(
+        ...[p.five != null ? resetText(p.fiveReset) : '', p.seven != null ? resetText(p.sevenReset) : ''].map((s) => s.length)))
       return (
         <Box flexDirection="column" gap="sm">
           {stale && <Box key={`stale-${name}`}><Text size="footnote" color="warning">{`Not live, last checked ${when(p.at!)}`}</Text></Box>}
-          {p.five != null && meter(`${key}-5`, '5 hours', p.five, p.fiveReset, barOf(name), WINDOW_MS.five)}
-          {p.seven != null && meter(`${key}-7`, 'Week', p.seven, p.sevenReset, barOf(name), WINDOW_MS.seven)}
+          {p.five != null && meter(`${key}-5`, '5 hours', p.five, p.fiveReset, barOf(name), WINDOW_MS.five, resetCols)}
+          {p.seven != null && meter(`${key}-7`, 'Week', p.seven, p.sevenReset, barOf(name), WINDOW_MS.seven, resetCols)}
         </Box>
       )
     }
@@ -364,17 +371,16 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap="lg">
         <Box flexDirection="column" gap="sm">
-          <Text size="heading" weight="semibold">
+          <Text size="footnote" weight="semibold">
             <Text weight="regular" size="footnote" dimColor>{'This chat runs on  '}</Text>
             {nameOf(acct)}
-            {planOf(acct) ? <Text weight="regular" size="footnote" dimColor>{`  ${planOf(acct)}`}</Text> : ''}
           </Text>
           {shown !== acct && <Text size="footnote" color="warning">{`Switching to ${nameOf(shown)} when this chat is idle`}</Text>}
           {Select && choices.length > 0 && (
             <Select
               key="account"
               value={shown}
-              options={choices.map(k => ({ value: k, label: nameOf(k) }))}
+              options={choices.map(k => ({ value: k, label: [nameOf(k), scale[k] != null ? `${scale[k]}x` : ''].filter(Boolean).join(' · ') }))}
               onSelect={value => { if (value !== shown) void moveHere(value)() }}
             />
           )}

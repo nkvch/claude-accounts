@@ -26,7 +26,16 @@ fi
 # Electron 44 (Claude 4.4212) refuses a repacked app.asar even with a matching plist hash
 # ("Failed to get integrity for validatable asar archive"); the copy is ad-hoc signed anyway.
 "$NODE" "$HERE/node_modules/@electron/fuses/dist/bin.js" write --app "$TMP" EnableEmbeddedAsarIntegrityValidation=off >/dev/null
-codesign --force --deep --sign - "$TMP" 2>/dev/null
+# Ad-hoc signing ties the Keychain's "Always Allow" for "Claude Safe Storage" to this one build, so
+# every rebuild asks again. A self-signed code-signing identity named below keeps it across rebuilds;
+# without one in the keychain the copy is signed ad-hoc.
+SIGN_ID="Claude Accounts Local Signing"
+if security find-identity -p codesigning | grep -qF "\"$SIGN_ID\""; then
+  codesign --force --deep --sign "$SIGN_ID" "$TMP"
+else
+  echo "signing ad-hoc: no \"$SIGN_ID\" identity in the keychain (Claude will ask for Claude Safe Storage after each rebuild)"
+  codesign --force --deep --sign - "$TMP"
+fi
 rm -rf "$DST"; mv "$TMP" "$DST"
 echo "$sig" > "$STAMP"
 echo "built $DST from $ver"

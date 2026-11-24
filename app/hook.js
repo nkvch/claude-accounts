@@ -63,6 +63,16 @@ globalThis.__ccAcctOv = (sessionId) => {
   return c !== undefined && c !== "default";
 };
 
+// Newer CLIs get the desktop's token into the env late (see patch.js); keep it for the limits probe.
+globalThis.__ccDesktopToken = (token) => {
+  try {
+    return logic().noteDesktopToken(state, token);
+  } catch (e) {
+    log(`desktop token: ${e && e.stack}`);
+    return token;
+  }
+};
+
 // ["<accountDir>", "<orgDir>"] of the shared Code session folder, or undefined
 // to keep the desktop's per-login folder.
 globalThis.__ccStore = () => {

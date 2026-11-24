@@ -46,6 +46,10 @@ s = once(s, /(?<![.\w$])([\w$]+)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOA
 // Older bundled CLIs (< 2.1.312) get the token keeper pushed through options.getOAuthToken after the env is built.
 s = once(s, /([\w$]+\.getOAuthToken)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOAuthToken\(/,
   `$1=globalThis.__ccAcctOv?.(${SID})?void 0:this.deps.cliOAuthTokenKeeper().trackCliOAuthToken(`, "token keeper (older CLI)");
+// Newer bundled CLIs (>= 2.1.326) get the desktop's token into the env only here, after the env is built:
+// hand it to the hook, which keeps it to probe the desktop login's limits.
+s = once(s, /spawnToken:([\w$]+)\.CLAUDE_CODE_OAUTH_TOKEN,everyday:!1\}/,
+  "spawnToken:globalThis.__ccDesktopToken?.($1.CLAUDE_CODE_OAUTH_TOKEN)??$1.CLAUDE_CODE_OAUTH_TOKEN,everyday:!1}", "desktop token (newer CLI)");
 s = once(s, new RegExp(`getHostAuthToken:([\\w$]+\\.[\\w$]+)\\(\\{spawnEnv:${ENV.replace(/\$/g, "\\$")},`),
   `getHostAuthToken:globalThis.__ccAcctOv?.(${SID})?void 0:$1({spawnEnv:${ENV},`, "host auth");
 // One Code session folder for every login, so switching account hides nothing.

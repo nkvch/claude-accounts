@@ -117,6 +117,14 @@ function pick(state, cfg, sessionId, cwd) {
   return { name: "default", why: "default" };
 }
 
+// The desktop login's own token, as it shows up in a session's env. A subscription's token is never taken for it.
+exports.noteDesktopToken = (state, token) => {
+  if (!token) return token;
+  const ours = Object.values(config().accounts || {}).map((a) => a?.tokenKey && envValue(a.tokenKey)).filter(Boolean);
+  if (!ours.includes(token)) state.desktopToken = token;
+  return token;
+};
+
 // Called right after the session env is built; mutates env.
 exports.acct = (state, sessionId, cwd, env) => {
   // Where the code and the config are, for the session's own tools (`acct`, the Subscriptions pane).
@@ -126,8 +134,7 @@ exports.acct = (state, sessionId, cwd, env) => {
   // environment (Claude started from a shell of a Code session), not from this session's pick.
   delete env.CC_ACCOUNT;
   const cfg = config();
-  const ours = Object.values(cfg.accounts || {}).map((a) => a?.tokenKey && envValue(a.tokenKey)).filter(Boolean);
-  if (env.CLAUDE_CODE_OAUTH_TOKEN && !ours.includes(env.CLAUDE_CODE_OAUTH_TOKEN)) state.desktopToken = env.CLAUDE_CODE_OAUTH_TOKEN;
+  exports.noteDesktopToken(state, env.CLAUDE_CODE_OAUTH_TOKEN);
   let { name, why } = pick(state, cfg, sessionId, cwd);
   (state.wanted ??= new Map()).set(sessionId, name);
   // A subscription whose last check failed (e.g. its org turned Claude Code off) would only

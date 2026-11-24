@@ -29,7 +29,8 @@ DEFAULT_BROWSER = "Default browser"
 COPY_LINK = "Copy the link (I'll open it in any browser)"
 LOG = os.path.join(config.STATE, "add_subscription.log")
 TOKEN = re.compile(r"sk-ant-oat01-[A-Za-z0-9_-]{20,}")
-URL = re.compile(r"https://claude\.com/cai/oauth/authorize\?[^\s\x07\x1b]+")
+# Older CLIs print the full authorize link on claude.com/cai; 2.1.330 prints a short one on claude.ai.
+URL = re.compile(r"https://(?:claude\.com/cai|claude\.ai)/oauth/authorize\?[^\s\x07\x1b]+")
 
 
 def osa(script):
@@ -123,7 +124,9 @@ def main():
     try:
         url, buf = read_until(fd, URL, 40)
         if not url:
-            return say("Claude Code did not give a sign-in link. Nothing was changed.")
+            log(buf)
+            return say("Claude Code did not give a sign-in link. Nothing was changed. What it printed is in "
+                       f"{LOG}.")
         if where in profiles:
             subprocess.run(["/usr/bin/open", "-na", "Google Chrome", "--args",
                             f"--profile-directory={profiles[where]}", "--new-window", url])

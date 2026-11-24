@@ -24,7 +24,10 @@ import config
 
 HOME = os.path.expanduser("~")
 CHROME_STATE = f"{HOME}/Library/Application Support/Google/Chrome/Local State"
-PLANS = {"Pro": 1, "Max 5x": 5, "Team Premium": 6.25, "Ultra": 10, "Max 20x": 20}
+# What the dialog lists -> (plan name kept in accounts.json, times Pro usage per week). The pane prints
+# the size next to the name itself ("Max · 5x"), so the name never carries it.
+PLANS = {"Pro": ("Pro", 1), "Max 5x": ("Max", 5), "Team Premium": ("Team Premium", 6.25),
+         "Ultra": ("Ultra", 10), "Max 20x": ("Max", 20)}
 DEFAULT_BROWSER = "Default browser"
 COPY_LINK = "Copy the link (I'll open it in any browser)"
 LOG = os.path.join(config.STATE, "add_subscription.log")
@@ -42,9 +45,8 @@ def quoted(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def ask(prompt, hidden=False):
-    extra = " with hidden answer" if hidden else ""
-    return osa(f'display dialog {quoted(prompt)} default answer "" with title "Add subscription"{extra}\n'
+def ask(prompt):
+    return osa(f'display dialog {quoted(prompt)} default answer "" with title "Add subscription"\n'
                'text returned of result')
 
 
@@ -138,7 +140,9 @@ def main():
             subprocess.run(["/usr/bin/pbcopy"], input=url.encode())
             prompt = ("The sign-in link is copied. Paste it into the browser where this Claude account is "
                       "signed in, sign in, then paste the code the page shows here:")
-        code = ask(prompt, hidden=True)
+        # Not a hidden field: a hidden one shows a long pasted code as a few dots, as if most of it were lost.
+        # The code works once, for this sign-in only.
+        code = ask(prompt)
         if not code:
             return print("cancelled")
         # Enter goes separately: sent in the same chunk, a long code reads as a paste and the
@@ -170,7 +174,7 @@ def main():
 
     cfg = config.load()
     cfg["accounts"][key] = {
-        "label": name, "tokenKey": env_key, "plan": plan, "proX": PLANS[plan],
+        "label": name, "tokenKey": env_key, "plan": PLANS[plan][0], "proX": PLANS[plan][1],
         "env": {"CLAUDE_CODE_SUBSCRIPTION_TYPE": "pro" if plan == "Pro" else "max"},
     }
     with open(config.ACCOUNTS, "w") as fh:

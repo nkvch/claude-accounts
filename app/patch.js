@@ -2,6 +2,7 @@
 // subscription (see hook.js). Usage: node patch.js "/path/to/Claude copy.app"
 // Every edit must match exactly once; otherwise exit non-zero and touch nothing.
 const asar = require("@electron/asar");
+const { patchIdle } = require("./idle.js");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
@@ -65,6 +66,11 @@ m = once(m, /refreshOutputStyles:\(\.\.\.([\w$]+)\)=>this\.refreshOutputStyles\(
   "refreshOutputStyles:(globalThis.__ccRestart=(sid)=>this.refreshOutputStyles(sid),(...$1)=>this.refreshOutputStyles(...$1))", "quiet restart");
 if (mgrFile === spawnFile) s = m; else fs.writeFileSync(mgrFile, m);
 fs.writeFileSync(spawnFile, s);
+
+// 2b. Pause idle normal sessions after 30 minutes (the server flag says never), except with Remote Control on.
+const idleFile = chunks.find((f) => /unattended:[^{}]*?\([\w$]+,[\w$]+\.held\)[^{}]*?unused:/.test(fs.readFileSync(f, "utf8")));
+if (!idleFile) throw new Error("idle timeout chunk not found");
+fs.writeFileSync(idleFile, patchIdle(fs.readFileSync(idleFile, "utf8"), once));
 
 // 3. This copy must never update itself (an update would drop the patch);
 //    build.sh rebuilds it from the official /Applications/Claude.app instead.

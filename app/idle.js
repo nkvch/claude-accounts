@@ -13,4 +13,16 @@ function patchIdle(src, once) {
   return src;
 }
 
+// Every change of a session's Remote Control state ends in the session manager's emitSessionUpdated.
+// There, on a change of "RC on or connecting": on -> cancel the session's idle timer (the timeout
+// function above would now say 0 anyway, but an already armed timer is not re-read); off -> arm it
+// again by the app's own startIdleTimeout, unless the session is running or its tab is on screen
+// (the app arms those later itself: turn complete, tab hidden).
+function patchIdleRemoteChange(src, once) {
+  return once(src, /emitSessionUpdated\(([\w$]+)\)\{(this\.sessionUpdates\.announce\(\1\))\}/,
+    (m, e, announce) => `emitSessionUpdated(${e}){let $w=this.warmLifecycle?.getState(${e}.sessionId);if($w){let $n=${e}.remoteControlEnabled===!0||${e}.remoteControlConnecting===!0;if($n!==($w.remoteControl===!0)){$w.remoteControl=$n;$n?this.warmLifecycle.clearIdleTimeout(${e}.sessionId,{silent:!0}):!${e}.isRunning&&!($w.visibilityKnown&&$w.isTabVisible)&&this.warmLifecycle.startIdleTimeout(${e}.sessionId)}}${announce}}`,
+    "idle remote control change");
+}
+
 exports.patchIdle = patchIdle;
+exports.patchIdleRemoteChange = patchIdleRemoteChange;

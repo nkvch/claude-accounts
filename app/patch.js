@@ -2,7 +2,7 @@
 // subscription (see hook.js). Usage: node patch.js "/path/to/Claude copy.app"
 // Every edit must match exactly once; otherwise exit non-zero and touch nothing.
 const asar = require("@electron/asar");
-const { patchIdle } = require("./idle.js");
+const { patchIdle, patchIdleRemoteChange } = require("./idle.js");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
@@ -71,6 +71,11 @@ fs.writeFileSync(spawnFile, s);
 const idleFile = chunks.find((f) => /unattended:[^{}]*?\([\w$]+,[\w$]+\.held\)[^{}]*?unused:/.test(fs.readFileSync(f, "utf8")));
 if (!idleFile) throw new Error("idle timeout chunk not found");
 fs.writeFileSync(idleFile, patchIdle(fs.readFileSync(idleFile, "utf8"), once));
+
+// 2c. Remote Control switched on later takes the idle timer off the session; switched off arms it again.
+const rcFile = chunks.find((f) => /emitSessionUpdated\([\w$]+\)\{this\.sessionUpdates\.announce\(/.test(fs.readFileSync(f, "utf8")));
+if (!rcFile) throw new Error("session update chunk not found");
+fs.writeFileSync(rcFile, patchIdleRemoteChange(fs.readFileSync(rcFile, "utf8"), once));
 
 // 3. This copy must never update itself (an update would drop the patch);
 //    build.sh rebuilds it from the official /Applications/Claude.app instead.

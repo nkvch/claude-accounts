@@ -1,0 +1,1 @@
+class M{constructor(){this.sessionUpdates={announce(e){}};this.warmLifecycle=i1({held:(...e)=>this.held(...e),pauseSession:(...e)=>this.pauseSession(...e),warmSession:(...e)=>this.warmSession(...e),hasSideChat:e=>this.sideQuery.hasSideChat(e)})}emitSessionUpdated(e){this.sessionUpdates.announce(e)}}

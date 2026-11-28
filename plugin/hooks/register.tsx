@@ -203,6 +203,18 @@ export const register: Register = on => {
     return started
   })
 
+  // The open at session.start is unasked, so a chat narrower than the engine's floor (144 columns, 110 once
+  // opened by hand) keeps the pane open but undrawn, and the desktop shows its own launcher instead.
+  // An open made while the person sends a prompt counts as theirs and is drawn at any width.
+  // A pane the person closed is no longer listed, so it stays closed.
+  on('prompt.submit', async ($, e, next) => {
+    if (!e.isMeta) {
+      const waiting = (await $.ui.panes()).some(p => p.id === PANE && !p.isPlaced)
+      if (waiting) void $.ui.open({ id: PANE, title: TITLE })
+    }
+    return next(e)
+  })
+
   on('command.run', { command: 'limits' }, async $ => {
     await $.ui.open({ id: PANE, title: TITLE })
     void load($)

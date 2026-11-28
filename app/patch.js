@@ -2,6 +2,7 @@
 // subscription (see hook.js). Usage: node patch.js "/path/to/Claude copy.app"
 // Every edit must match exactly once; otherwise exit non-zero and touch nothing.
 const asar = require("@electron/asar");
+const { patchIdle, patchIdleRemoteChange } = require("./idle.js");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
@@ -46,6 +47,10 @@ s = once(s, /(?<![.\w$])([\w$]+)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOA
 // Older bundled CLIs (< 2.1.312) get the token keeper pushed through options.getOAuthToken after the env is built.
 s = once(s, /([\w$]+\.getOAuthToken)=this\.deps\.cliOAuthTokenKeeper\(\)\.trackCliOAuthToken\(/,
   `$1=globalThis.__ccAcctOv?.(${SID})?void 0:this.deps.cliOAuthTokenKeeper().trackCliOAuthToken(`, "token keeper (older CLI)");
+// Newer bundled CLIs (>= 2.1.326) get the desktop's token into the env only here, after the env is built:
+// hand it to the hook, which keeps it to probe the desktop login's limits.
+s = once(s, /spawnToken:([\w$]+)\.CLAUDE_CODE_OAUTH_TOKEN,everyday:!1\}/,
+  "spawnToken:globalThis.__ccDesktopToken?.($1.CLAUDE_CODE_OAUTH_TOKEN)??$1.CLAUDE_CODE_OAUTH_TOKEN,everyday:!1}", "desktop token (newer CLI)");
 s = once(s, new RegExp(`getHostAuthToken:([\\w$]+\\.[\\w$]+)\\(\\{spawnEnv:${ENV.replace(/\$/g, "\\$")},`),
   `getHostAuthToken:globalThis.__ccAcctOv?.(${SID})?void 0:$1({spawnEnv:${ENV},`, "host auth");
 // One Code session folder for every login, so switching account hides nothing.
@@ -61,6 +66,16 @@ m = once(m, /refreshOutputStyles:\(\.\.\.([\w$]+)\)=>this\.refreshOutputStyles\(
   "refreshOutputStyles:(globalThis.__ccRestart=(sid)=>this.refreshOutputStyles(sid),(...$1)=>this.refreshOutputStyles(...$1))", "quiet restart");
 if (mgrFile === spawnFile) s = m; else fs.writeFileSync(mgrFile, m);
 fs.writeFileSync(spawnFile, s);
+
+// 2b. Pause idle normal sessions after 30 minutes (the server flag says never), except with Remote Control on.
+const idleFile = chunks.find((f) => /unattended:[^{}]*?\([\w$]+,[\w$]+\.held\)[^{}]*?unused:/.test(fs.readFileSync(f, "utf8")));
+if (!idleFile) throw new Error("idle timeout chunk not found");
+fs.writeFileSync(idleFile, patchIdle(fs.readFileSync(idleFile, "utf8"), once));
+
+// 2c. Remote Control switched on later takes the idle timer off the session; switched off arms it again.
+const rcFile = chunks.find((f) => /emitSessionUpdated\([\w$]+\)\{this\.sessionUpdates\.announce\(/.test(fs.readFileSync(f, "utf8")));
+if (!rcFile) throw new Error("session update chunk not found");
+fs.writeFileSync(rcFile, patchIdleRemoteChange(fs.readFileSync(rcFile, "utf8"), once));
 
 // 3. This copy must never update itself (an update would drop the patch);
 //    build.sh rebuilds it from the official /Applications/Claude.app instead.

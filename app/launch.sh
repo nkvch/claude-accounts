@@ -10,8 +10,17 @@ mkdir -p "$STATE"
 exec >>"$LOG" 2>&1
 echo "== $(date)"
 
+# Both apps carry the same bundle id, and macOS opens whichever it prefers for that id: a click on
+# a Claude notification launched the official app. Unregistering the official one leaves the id to
+# the patched copy. A brew upgrade registers it again, so this runs on every launch.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+own_bundle_id() {
+  "$LSREGISTER" -u /Applications/Claude.app || echo "lsregister: could not unregister the official Claude"
+  "$LSREGISTER" -f "$DST" || echo "lsregister: could not register $DST"
+}
+
 # Already running from the patched copy: just bring it forward.
-if pgrep -f "^$DST/Contents/MacOS/Claude" >/dev/null; then open -a "$DST"; exit 0; fi
+if pgrep -f "^$DST/Contents/MacOS/Claude" >/dev/null; then own_bundle_id; open -a "$DST"; exit 0; fi
 
 # Both copies share one data folder, so only one may run: quit the official one.
 # Fails when it is still alive afterwards (unsaved dialog, hang), so nothing else may start.
@@ -56,9 +65,11 @@ fi
 if "$HERE/build.sh"; then
   # Claude is not running here, so the session folders are safe to touch (no-op unless configured).
   /usr/bin/python3 "$HERE/merge_sessions.py"
+  own_bundle_id
   open -a "$DST"
 elif [ -d "$DST" ]; then
   osascript -e 'display notification "The new Claude version did not take the patch yet; opened the previous version." with title "Claude Accounts"'
+  own_bundle_id
   open -a "$DST"
 else
   osascript -e "display notification \"The patch did not apply to this Claude version. Details: $LOG\" with title \"Claude Accounts\""

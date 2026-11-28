@@ -622,3 +622,27 @@ test('when demo.json goes away the file is shown again even though its text did 
   expect(await hasText(ui, left(22))).toBe(false)
   await ui.unmount()
 })
+
+for (const [what, panes, reopens] of [
+  ['open but undrawn', [{ id: 'subscriptions', title: 'Subscriptions', isShown: false, isFocused: false, isPlaced: false }], true],
+  ['already drawn', [{ id: 'subscriptions', title: 'Subscriptions', isShown: true, isFocused: false, isPlaced: true }], false],
+  ['closed by hand', [], false],
+] as const) {
+  test(`a prompt the person sends while the pane is ${what} ${reopens ? 'opens it again' : 'leaves it alone'}`, async ($, on) => {
+    const opens: string[] = []
+    on('command.register', (_, e) => ({ value: { command: e.name } }))
+    on('ui.open', (_, e) => { opens.push(e.id); return { value: { isPlaced: false, reason: 'below 144 columns' } } })
+    on('ui.panes', () => ({ value: panes }))
+    on('session.start', (_, e) => ({ cwd: e.cwd }))
+    on('env.get', (_, e) => ({ value: ENV[e.name] }))
+    on('fs.read', () => ({ value: undefined }))
+    on('process.run', () => ({ value: { exitCode: 0, stdout: 'off', stderr: '' } }))
+    on('prompt.submit', (_, e) => ({ text: e.text }))
+    await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+    await new Promise(r => setTimeout(r, 50))
+    opens.length = 0
+    await $.prompt.submit({ text: 'hello' })
+    await new Promise(r => setTimeout(r, 50))
+    expect(opens).toEqual(reopens ? ['subscriptions'] : [])
+  })
+}

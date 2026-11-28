@@ -371,3 +371,13 @@ test("a subscription's own token is never taken for the desktop login's", () => 
   logic.acct(state, "s-own", "/tmp/proj", { CLAUDE_CODE_OAUTH_TOKEN: "fake-cr" });
   assert.strictEqual(state.desktopToken, undefined);
 });
+
+test("a desktop token that reaches the hook after the env is built is kept and passed through, a subscription's is not", () => {
+  const state = { chosen: new Map() };
+  assert.strictEqual(logic.noteDesktopToken(state, "late-desktop-token"), "late-desktop-token");
+  assert.strictEqual(state.desktopToken, "late-desktop-token");
+  assert.strictEqual(logic.noteDesktopToken(state, "fake-cr"), "fake-cr");
+  assert.strictEqual(state.desktopToken, "late-desktop-token");
+  assert.strictEqual(logic.noteDesktopToken(state, undefined), undefined);
+  assert.strictEqual(state.desktopToken, "late-desktop-token");
+});
